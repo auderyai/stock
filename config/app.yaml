@@ -1,0 +1,47 @@
+app:
+  name: KRX AutoArchive
+  environment: workstation
+  timezone: Asia/Seoul
+
+machine:
+  profile: WORKSTATION_RYZEN_5900X
+  compute: cpu
+  gpu_enabled: false
+  python: "3.11"
+
+database:
+  preferred_engine: postgresql
+  compatibility_engines: []
+  schemas:
+    market: market
+    financial: financial
+  canonical_price_granularity: daily
+  derived_price_granularities:
+    - weekly
+    - monthly
+    - quarterly
+    - yearly
+  expected_concurrent_users: 20
+  reader_connection_limit: 40
+  writer_connection_limit: 12
+  server_max_connections: 80
+  credentials_file: .env
+
+storage:
+  root: C:/stock
+  inbox: C:/stock/00_INBOX
+  companies: C:/stock/01_기업분석
+  daily: C:/stock/02_매일
+  weekly: C:/stock/03_주간
+  monthly: C:/stock/04_월간
+  sectors: C:/stock/05_분야별
+  database: C:/stock/90_공통관리/DATABASE
+  index: C:/stock/90_공통관리/INDEX
+  logs: C:/stock/90_공통관리/LOGS
+  backup: C:/stock/90_공통관리/BACKUP
+  migration_archive: C:/stock/POSTGRESQL_BACKUP
+
+git:
+  automatic_commit: false
+  automatic_push: false
+  require_approval: true

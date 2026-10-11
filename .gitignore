@@ -218,3 +218,44 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Stock workstation: local secrets and machine-specific configuration
+.env.*
+!.env.example
+*.local
+config/*.dpapi
+.venv_*/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Stock workstation: runtime and generated artifacts
+logs/
+log/
+LOGS/
+*.tmp
+*.bak
+*.zip
+*.7z
+*.rar
+exports/
+output/
+reports/generated/
+reports/nextgen_*.png
+tmp/
+
+# Local database backups and recoverable implementation snapshots
+POSTGRESQL_BACKUP/
+_rollback/
+_patch_review/
+
+# Database files must never be tracked in the source repository
+*.db
+*.sqlite
+*.sqlite3
+*.mdb
+
+# Preserve template placeholders
+!templates/**/.gitkeep

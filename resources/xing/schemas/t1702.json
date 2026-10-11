@@ -1,0 +1,200 @@
+{
+  "tr_code": "t1702",
+  "tr_name": "외인/기관 종목별동향",
+  "source": "LS DevCenter current screen supplied by user",
+  "total_size": 261,
+  "blocks": [
+    {
+      "name": "t1702InBlock",
+      "direction": "input",
+      "size": 26,
+      "occurs": false,
+      "fields": [
+        {
+          "name": "shcode",
+          "type": "string",
+          "size": 6,
+          "description": "종목코드"
+        },
+        {
+          "name": "fromdt",
+          "type": "string",
+          "size": 8,
+          "description": "시작일자"
+        },
+        {
+          "name": "todt",
+          "type": "string",
+          "size": 8,
+          "description": "종료일자"
+        },
+        {
+          "name": "volvalgb",
+          "type": "string",
+          "size": 1,
+          "description": "금액수량구분(0:금액,1:수량,2:단가)"
+        },
+        {
+          "name": "msmdgb",
+          "type": "string",
+          "size": 1,
+          "description": "매수매도구분(0:순매수,1:매수,2:매도)"
+        },
+        {
+          "name": "gubun",
+          "type": "string",
+          "size": 1,
+          "description": "누적구분(0:일간,1:누적)"
+        },
+        {
+          "name": "exchgubun",
+          "type": "string",
+          "size": 1,
+          "description": "거래소구분코드"
+        }
+      ]
+    },
+    {
+      "name": "t1702OutBlock1",
+      "direction": "output",
+      "size": 235,
+      "occurs": true,
+      "fields": [
+        {
+          "name": "date",
+          "type": "string",
+          "size": 8,
+          "description": "일자"
+        },
+        {
+          "name": "close",
+          "type": "long",
+          "size": 8,
+          "description": "종가"
+        },
+        {
+          "name": "sign",
+          "type": "string",
+          "size": 1,
+          "description": "전일대비구분"
+        },
+        {
+          "name": "change",
+          "type": "long",
+          "size": 8,
+          "description": "전일대비"
+        },
+        {
+          "name": "diff",
+          "type": "float",
+          "size": 6,
+          "decimals": 2,
+          "description": "등락률"
+        },
+        {
+          "name": "volume",
+          "type": "long",
+          "size": 12,
+          "description": "누적거래량"
+        },
+        {
+          "name": "tjj0000",
+          "type": "long",
+          "size": 12,
+          "description": "사모펀드"
+        },
+        {
+          "name": "tjj0001",
+          "type": "long",
+          "size": 12,
+          "description": "증권"
+        },
+        {
+          "name": "tjj0002",
+          "type": "long",
+          "size": 12,
+          "description": "보험"
+        },
+        {
+          "name": "tjj0003",
+          "type": "long",
+          "size": 12,
+          "description": "투신"
+        },
+        {
+          "name": "tjj0004",
+          "type": "long",
+          "size": 12,
+          "description": "은행"
+        },
+        {
+          "name": "tjj0005",
+          "type": "long",
+          "size": 12,
+          "description": "종금"
+        },
+        {
+          "name": "tjj0006",
+          "type": "long",
+          "size": 12,
+          "description": "기금"
+        },
+        {
+          "name": "tjj0007",
+          "type": "long",
+          "size": 12,
+          "description": "기타법인"
+        },
+        {
+          "name": "tjj0008",
+          "type": "long",
+          "size": 12,
+          "description": "개인"
+        },
+        {
+          "name": "tjj0009",
+          "type": "long",
+          "size": 12,
+          "description": "등록외국인"
+        },
+        {
+          "name": "tjj0010",
+          "type": "long",
+          "size": 12,
+          "description": "미등록외국인"
+        },
+        {
+          "name": "tjj0011",
+          "type": "long",
+          "size": 12,
+          "description": "국가외"
+        },
+        {
+          "name": "tjj0018",
+          "type": "long",
+          "size": 12,
+          "description": "기관"
+        },
+        {
+          "name": "tjj0016",
+          "type": "long",
+          "size": 12,
+          "description": "외인계(등록+미등록)"
+        },
+        {
+          "name": "tjj0017",
+          "type": "long",
+          "size": 12,
+          "description": "기타계(기타+국가)"
+        },
+        {
+          "name": "value",
+          "type": "long",
+          "size": 12,
+          "description": "거래대금"
+        }
+      ]
+    }
+  ],
+  "attribute": true
+}

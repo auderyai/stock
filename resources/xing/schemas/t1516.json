@@ -1,0 +1,197 @@
+{
+  "tr_code": "t1516",
+  "tr_name": "업종별 종목시세",
+  "source": "LS DevCenter current screen supplied by user",
+  "total_size": 205,
+  "blocks": [
+    {
+      "name": "t1516InBlock",
+      "direction": "input",
+      "size": 10,
+      "occurs": false,
+      "fields": [
+        {
+          "name": "upcode",
+          "type": "string",
+          "size": 3,
+          "description": "업종코드"
+        },
+        {
+          "name": "gubun",
+          "type": "string",
+          "size": 1,
+          "description": "구분"
+        },
+        {
+          "name": "shcode",
+          "type": "string",
+          "size": 6,
+          "description": "종목코드"
+        }
+      ]
+    },
+    {
+      "name": "t1516OutBlock",
+      "direction": "output",
+      "size": 32,
+      "occurs": false,
+      "fields": [
+        {
+          "name": "shcode",
+          "type": "string",
+          "size": 6,
+          "description": "종목코드"
+        },
+        {
+          "name": "pricejisu",
+          "type": "float",
+          "size": 12,
+          "decimals": 2,
+          "description": "지수"
+        },
+        {
+          "name": "sign",
+          "type": "string",
+          "size": 1,
+          "description": "전일대비구분"
+        },
+        {
+          "name": "change",
+          "type": "float",
+          "size": 7,
+          "decimals": 2,
+          "description": "전일대비"
+        },
+        {
+          "name": "jdiff",
+          "type": "float",
+          "size": 6,
+          "decimals": 2,
+          "description": "등락률"
+        }
+      ]
+    },
+    {
+      "name": "t1516OutBlock1",
+      "direction": "output",
+      "size": 163,
+      "occurs": true,
+      "fields": [
+        {
+          "name": "hname",
+          "type": "string",
+          "size": 20,
+          "description": "종목명"
+        },
+        {
+          "name": "price",
+          "type": "long",
+          "size": 8,
+          "description": "현재가"
+        },
+        {
+          "name": "sign",
+          "type": "string",
+          "size": 1,
+          "description": "전일대비구분"
+        },
+        {
+          "name": "change",
+          "type": "long",
+          "size": 8,
+          "description": "전일대비"
+        },
+        {
+          "name": "diff",
+          "type": "float",
+          "size": 6,
+          "decimals": 2,
+          "description": "등락률"
+        },
+        {
+          "name": "volume",
+          "type": "long",
+          "size": 12,
+          "description": "누적거래량"
+        },
+        {
+          "name": "open",
+          "type": "long",
+          "size": 8,
+          "description": "시가"
+        },
+        {
+          "name": "high",
+          "type": "long",
+          "size": 8,
+          "description": "고가"
+        },
+        {
+          "name": "low",
+          "type": "long",
+          "size": 8,
+          "description": "저가"
+        },
+        {
+          "name": "sojinrate",
+          "type": "float",
+          "size": 6,
+          "decimals": 2,
+          "description": "소진율"
+        },
+        {
+          "name": "beta",
+          "type": "float",
+          "size": 6,
+          "decimals": 5,
+          "description": "베타계수"
+        },
+        {
+          "name": "perx",
+          "type": "float",
+          "size": 8,
+          "decimals": 2,
+          "description": "PER"
+        },
+        {
+          "name": "frgsvolume",
+          "type": "long",
+          "size": 12,
+          "description": "외인순매수"
+        },
+        {
+          "name": "orgsvolume",
+          "type": "long",
+          "size": 12,
+          "description": "기관순매수"
+        },
+        {
+          "name": "diff_vol",
+          "type": "float",
+          "size": 10,
+          "decimals": 2,
+          "description": "거래증가율"
+        },
+        {
+          "name": "shcode",
+          "type": "string",
+          "size": 6,
+          "description": "종목코드"
+        },
+        {
+          "name": "total",
+          "type": "long",
+          "size": 12,
+          "description": "시가총액"
+        },
+        {
+          "name": "value",
+          "type": "long",
+          "size": 12,
+          "description": "거래대금"
+        }
+      ]
+    }
+  ],
+  "attribute": true
+}

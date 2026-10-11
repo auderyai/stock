@@ -1,0 +1,73 @@
+{
+  "install_root": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)",
+  "source_res": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res",
+  "managed_res": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res",
+  "current_res_trs": [
+    "t8424",
+    "t8436",
+    "t8429",
+    "t8451"
+  ],
+  "blocked_trs": [
+    "t1516",
+    "t1702"
+  ],
+  "files": [
+    {
+      "tr": "t8424",
+      "variant": "base",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8424.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8424.res",
+      "sha256": "e40d533b58279f28e85dd7e40f38cf063e7bb96fae34f44547737bf4da8a70cf"
+    },
+    {
+      "tr": "t8424",
+      "variant": "_2",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8424_2.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8424_2.res",
+      "sha256": "e40d533b58279f28e85dd7e40f38cf063e7bb96fae34f44547737bf4da8a70cf"
+    },
+    {
+      "tr": "t8436",
+      "variant": "base",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8436.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8436.res",
+      "sha256": "80d2e651bd4f77fac80f9f41ff33e7142c2090c928510ad21d15b69e6cde9b1f"
+    },
+    {
+      "tr": "t8436",
+      "variant": "_2",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8436_2.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8436_2.res",
+      "sha256": "80d2e651bd4f77fac80f9f41ff33e7142c2090c928510ad21d15b69e6cde9b1f"
+    },
+    {
+      "tr": "t8429",
+      "variant": "base",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8429.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8429.res",
+      "sha256": "73ebd45553e65206c69a4ce792339ce17aeccd2bffdbc8b238ee43eb098d54f0"
+    },
+    {
+      "tr": "t8429",
+      "variant": "_2",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8429_2.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8429_2.res",
+      "sha256": "73ebd45553e65206c69a4ce792339ce17aeccd2bffdbc8b238ee43eb098d54f0"
+    },
+    {
+      "tr": "t8451",
+      "variant": "base",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8451.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8451.res",
+      "sha256": "c68d8c949c6a312c02c25084bf6a54aa30089d7280211fa63f552835bf619a8f"
+    },
+    {
+      "tr": "t8451",
+      "variant": "_2",
+      "source": "C:\\LS_SEC\\xingAPI_Program(2025.06.07)\\Res\\t8451_2.res",
+      "target": "C:\\Users\\PLATINUM\\new_stock\\resources\\xing\\current_res\\t8451_2.res",
+      "sha256": "c68d8c949c6a312c02c25084bf6a54aa30089d7280211fa63f552835bf619a8f"
+    }
+  ]
+}

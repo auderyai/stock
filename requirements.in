@@ -1,0 +1,15 @@
+# new_stock runtime: PySide6 + PostgreSQL only
+PySide6>=6.8,<7
+matplotlib>=3.8,<4
+pandas>=2.2,<3
+numpy>=1.26,<3
+psycopg[binary]>=3.2,<4
+openpyxl>=3.1,<4
+python-dotenv>=1.0,<2
+requests>=2.32,<3
+pypdf>=6,<7
+pykrx>=1,<2
+pywin32>=306; sys_platform == "win32"
+
+# Original workstation indicator-scenario model
+scikit-learn>=1.5,<2

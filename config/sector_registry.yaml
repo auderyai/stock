@@ -1,0 +1,10 @@
+version: 1
+workflow:
+  states:
+    - detected
+    - candidate
+    - approved
+    - active
+  activation_requires_user_approval: true
+
+sectors: []

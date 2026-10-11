@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "krx-research-nextgen-stage1"
+version = "0.1.0"
+description = "Isolated Stage-1 PyQt6 + Finplot + ta architecture for C:\\stock"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6==6.11.0",
+    "finplot==1.9.7",
+    "pyqtgraph==0.13.7",
+    "ta==0.11.0",
+    "pandas>=2.2,<3",
+    "numpy>=1.26,<3",
+    "python-dateutil>=2.8",
+    "psycopg[binary]>=3.2,<4",
+    "requests>=2.32,<3",
+    "pypdf>=6,<7",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
