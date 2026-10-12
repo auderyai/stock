@@ -48,10 +48,14 @@ Git Credential Manager에 `auderyai/stock` 쓰기 자격증명이 이미 저장�
 tools\setup\RUN_PC_DRIVE_SYNC.cmd
 ```
 
-매일 07:00 및 PC가 꺼져 있어 놓친 경우 다음 사용 시 실행하도록 등록:
+매일 07:00부터 23:00까지 1시간 간격으로 확인하고, PC가 꺼져 있어 놓친 경우 다음
+Windows 로그인 후 실행하도록 등록:
 
 ```powershell
 tools\setup\REGISTER_PC_DRIVE_SYNC_TASK.cmd
 ```
+
+각 실행은 `market_core.drive_sync_batches`의 적용 이력을 먼저 확인합니다. 따라서 새 변경분이
+없거나 같은 변경분을 이미 적용한 경우에는 DB에 중복 반영하지 않습니다.
 
 감사 로그는 `logs/cloud_sync/drive_sync.log`에 성공·실패 상태만 기록하며 비밀값은 기록하지 않습니다.
