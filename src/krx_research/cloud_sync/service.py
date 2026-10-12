@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -180,9 +181,14 @@ class StockDriveSyncService:
             return result
 
     def _run(self, script: str, *arguments: str, accepted: tuple[int, ...] = (0,)) -> int:
+        env = os.environ.copy()
+        src = str(self._context.root / "src")
+        current = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = os.pathsep.join((src, current)) if current else src
         completed = subprocess.run(
             [sys.executable, str(self._context.root / script), *arguments],
             cwd=self._context.root,
+            env=env,
             check=False,
         )
         if completed.returncode not in accepted:
