@@ -24,6 +24,7 @@ class XingDbMenuService:
     )
     _INDEX_COUNT_TOLERANCE = 5
     _LS_QUALIFIED_LOOKBACK_DAYS = 45
+    _T1702_REPAIR_PASSES = 3
     _VENUE_CODE = {"KRX": "K", "NXT": "N", "COMBINED": "U"}
 
     def __init__(self, bridge: RawTrPort, repository: XingMenuRepositoryPort) -> None:
@@ -242,6 +243,34 @@ class XingDbMenuService:
                 self._emit(progress, f"[PROGRESS] {pos:,}/{len(codes):,}종목 처리")
 
         verified = self._repo.completed_investor_dates_by_code(codes, start, end, "K")
+        for repair_pass in range(1, self._T1702_REPAIR_PASSES + 1):
+            unresolved_by_code = {
+                code: trade_days.get(code, set()) - verified.get(code, set())
+                for code in codes
+                if trade_days.get(code, set()) - verified.get(code, set())
+            }
+            if not unresolved_by_code:
+                break
+            self._emit(
+                progress,
+                f"[REPAIR {repair_pass}/{self._T1702_REPAIR_PASSES}] "
+                f"t1702 누락 {len(unresolved_by_code):,}종목만 재수집",
+            )
+            for code, unresolved in unresolved_by_code.items():
+                try:
+                    found, complete = self._collect_t1702(code, sorted(unresolved))
+                    total_raw += len(found)
+                    total_complete += self._repo.upsert_investor_raw(code, found, complete, "K")
+                    if unresolved.issubset(set(complete)):
+                        refresh_failed.discard(code)
+                except Exception as exc:
+                    request_failures += 1
+                    self._emit(
+                        progress,
+                        f"[REPAIR {repair_pass}] {code}: {type(exc).__name__}: {exc}",
+                    )
+            verified = self._repo.completed_investor_dates_by_code(codes, start, end, "K")
+
         failures = 0; unresolved_codes: set[str] = set()
         for code in codes:
             expected = trade_days.get(code, set()); unresolved = expected - verified.get(code, set())
@@ -254,8 +283,13 @@ class XingDbMenuService:
             self._emit(progress, f"[FAIL] {code}: force-refresh 요청 실패")
         self._emit(progress, f"[VERIFY] PostgreSQL 일괄 검증 완료: 미완료 {failures:,}거래일")
 
-        if failures or request_failures:
+        if failures:
             message = f"미완료 {failures:,}건/거래일, 요청실패 {request_failures:,}회"
+        elif request_failures:
+            message = (
+                f"PASS / 원본 {total_raw:,}건, 신규완료 {total_complete:,}일, "
+                f"일시 요청실패 {request_failures:,}회 복구"
+            )
         elif total_raw:
             message = f"PASS / 원본 {total_raw:,}건, 신규완료 {total_complete:,}일"
         else:
