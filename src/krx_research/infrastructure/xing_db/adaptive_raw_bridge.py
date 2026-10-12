@@ -51,13 +51,7 @@ class AdaptiveRawTrBridge:
 
     def connect(self) -> None:
         try:
-            appkey, secret = self._credential_loader(self._root)
-            response = self._session.post(f"{self._BASE}/oauth2/token", data={
-                "grant_type": "client_credentials", "appkey": appkey,
-                "appsecretkey": secret, "scope": "oob",
-            }, timeout=15)
-            response.raise_for_status(); self._token = str(response.json().get("access_token") or "").strip()
-            if not self._token: raise RuntimeError("access_token 없음")
+            self._authorize()
             self._enabled = True; self._emit("[LS OPENAPI] t1702/t8451 primary 연결 완료 (1 TR/sec)")
         except Exception as exc:
             detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
@@ -111,12 +105,20 @@ class AdaptiveRawTrBridge:
 
     def _request(self, path: str, tr: str, block: str, values: dict[str, Any], continuation: str, key: str):
         response = None
-        for attempt in range(3):
+        server_retries, token_refreshed = 0, False
+        while True:
             self._pace(tr); response = self._post(path, tr, block, values, continuation, key)
-            if response.status_code < 500 and response.status_code != 429: break
-            if attempt < 2:
-                self._emit(f"[LS OPENAPI RETRY] {tr}: HTTP {response.status_code}, {attempt + 1}/2")
-                self._sleep(1.25 * (attempt + 1)); self._last_call.pop(tr, None)
+            if self._response_code(response) == "IGW00121" and not token_refreshed:
+                self._emit(f"[LS OPENAPI TOKEN] {tr}: 토큰 무효 감지, 1회 자동 재발급")
+                self._authorize(); token_refreshed = True; self._last_call.pop(tr, None)
+                continue
+            if response.status_code < 500 and response.status_code != 429:
+                break
+            if server_retries >= 2:
+                break
+            server_retries += 1
+            self._emit(f"[LS OPENAPI RETRY] {tr}: HTTP {response.status_code}, {server_retries}/2")
+            self._sleep(1.25 * server_retries); self._last_call.pop(tr, None)
         assert response is not None
         if response.status_code >= 400:
             try:
@@ -128,6 +130,25 @@ class AdaptiveRawTrBridge:
             except (ValueError, TypeError):
                 response.raise_for_status()
         return response
+
+    def _authorize(self) -> None:
+        appkey, secret = self._credential_loader(self._root)
+        response = self._session.post(f"{self._BASE}/oauth2/token", data={
+            "grant_type": "client_credentials", "appkey": appkey,
+            "appsecretkey": secret, "scope": "oob",
+        }, timeout=15)
+        response.raise_for_status()
+        self._token = str(response.json().get("access_token") or "").strip()
+        if not self._token:
+            raise RuntimeError("access_token 없음")
+
+    @staticmethod
+    def _response_code(response) -> str:
+        try:
+            payload = response.json()
+        except (TypeError, ValueError):
+            return ""
+        return str(payload.get("rsp_cd") or "") if isinstance(payload, dict) else ""
 
     def _post(self, path: str, tr: str, block: str, values: dict[str, Any], continuation: str, key: str):
         return self._session.post(f"{self._BASE}{path}", headers={
