@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -31,11 +32,19 @@ class AdaptiveRawTrBridge:
 
     def __init__(self, project_root: Path, *, progress: Progress | None = None,
                  session=None, credential_loader=load_ls_credentials,
-                 fallback_factory=None, sleep_fn=time.sleep, clock_fn=time.monotonic) -> None:
+                 fallback_factory=None, sleep_fn=time.sleep, clock_fn=time.monotonic,
+                 fallback_allowed: bool | None = None) -> None:
         self._root, self._progress = Path(project_root).resolve(), progress
-        if self._root != Path(r"C:\stock").resolve(): raise ValueError("AdaptiveRawTrBridge는 C:\\stock 전용입니다.")
+        if not (self._root / "src" / "krx_research").is_dir():
+            raise ValueError("LS 공급자 project_root가 Stock 프로젝트가 아닙니다.")
         self._session, self._credential_loader = session or requests.Session(), credential_loader
         self._fallback_factory = fallback_factory or self._default_fallback
+        setting = os.getenv("KRX_XING_FALLBACK", "1").strip().lower()
+        self._fallback_allowed = (
+            fallback_allowed
+            if fallback_allowed is not None
+            else setting not in {"0", "false", "no", "off"}
+        )
         self._sleep, self._clock = sleep_fn, clock_fn
         self._token, self._enabled, self._fallback = "", False, None
         self._last_call: dict[str, float] = {}
@@ -52,7 +61,12 @@ class AdaptiveRawTrBridge:
             self._enabled = True; self._emit("[LS OPENAPI] t1702/t8451 primary 연결 완료 (1 TR/sec)")
         except Exception as exc:
             detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-            self._enabled = False; self._emit(f"[LS OPENAPI] 연결 불가 → Xing fallback: {type(exc).__name__}: {detail}")
+            self._enabled = False
+            if not self._fallback_allowed:
+                raise DataProviderUnavailableError(
+                    f"LS OpenAPI 연결 실패: {type(exc).__name__}: {detail}"
+                ) from exc
+            self._emit(f"[LS OPENAPI] 연결 불가 → Xing fallback: {type(exc).__name__}: {detail}")
             try: self._xing()
             except Exception as fallback_error:
                 raise DataProviderUnavailableError(
@@ -70,6 +84,10 @@ class AdaptiveRawTrBridge:
         if self._enabled and code in self._API:
             try: return self._openapi(code, values)
             except Exception as exc: self._emit(f"[LS OPENAPI FALLBACK] {code}: {type(exc).__name__}: {exc}")
+        if not self._fallback_allowed:
+            if code not in self._API:
+                raise DataProviderUnavailableError(f"LS OpenAPI 미지원 TR입니다: {code}")
+            raise DataProviderUnavailableError(f"LS OpenAPI 요청에 실패했습니다: {code}")
         return self._xing().raw_tr(tr, values)
 
     def _openapi(self, tr: str, values: dict[str, str]) -> dict[str, Any]:
@@ -121,6 +139,8 @@ class AdaptiveRawTrBridge:
         return RateLimitedRawTrBridge(XingBridgeClient(self._root), progress=self._progress)
 
     def _xing(self):
+        if not self._fallback_allowed:
+            raise DataProviderUnavailableError("이 실행 환경에서는 Xing DLL fallback이 비활성화되어 있습니다.")
         if self._fallback is None:
             self._fallback = self._fallback_factory(); self._fallback.connect()
             self._emit("[XING FALLBACK] 필요한 요청에 한해 DLL 연결")

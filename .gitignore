@@ -224,6 +224,8 @@ __marimo__/
 !.env.example
 *.local
 config/*.dpapi
+tools/setup/google_oauth_client.json
+tools/setup/client_secret_*.json
 .venv_*/
 .vscode/
 .idea/
