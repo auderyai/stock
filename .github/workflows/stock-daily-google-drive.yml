@@ -47,6 +47,7 @@ jobs:
       LS_APP_SECRET: ${{ secrets.LS_APP_SECRET }}
       KRX_XING_FALLBACK: "0"
       PYTHONUTF8: "1"
+      TZ: "Asia/Seoul"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
