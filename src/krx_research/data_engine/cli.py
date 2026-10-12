@@ -89,6 +89,10 @@ def command_update(args: argparse.Namespace) -> int:
             "(20:10 KST 이전 또는 주말)"
         )
     with _repository() as repository:
+        # A cloud worker restores only the bounded worker snapshot.  Reapply the
+        # idempotent core migration before every update so operational tables
+        # such as market_core.update_runs are always present.
+        repository.initialize_schema()
         provider = PykrxBaseProvider(
             repository.settings.provider_delay_seconds,
             fallback_universe=repository.get_security_master_frame(),
