@@ -246,7 +246,6 @@ class DatabaseArchiveService:
     def _dump_schema(self, executable: Path, output: Path) -> None:
         if not executable.is_file():
             raise CloudArchiveError(f"pg_dump 실행 파일이 없습니다: {executable}")
-        schema = self._compatible_restore_schema(schema)
         parameters = self._parameters()
         environment = os.environ.copy()
         if parameters.get("password"):
@@ -282,6 +281,7 @@ class DatabaseArchiveService:
     def _restore_schema(self, executable: Path, schema: Path) -> None:
         if not executable.is_file():
             raise CloudArchiveError(f"psql 실행 파일이 없습니다: {executable}")
+        schema = self._compatible_restore_schema(schema)
         # A table-filtered pg_dump does not promise to emit CREATE SCHEMA.  Create
         # only the two allow-listed namespaces before invoking psql.
         with self._conn.transaction():

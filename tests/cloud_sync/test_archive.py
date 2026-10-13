@@ -5,6 +5,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 from krx_research.cloud_sync.archive import (
     ArchiveCipher,
@@ -61,6 +62,36 @@ class ArchiveCipherTests(unittest.TestCase):
             self.assertNotIn("transaction_timeout", text)
             self.assertIn("statement_timeout", text)
             self.assertIn("CREATE TABLE", text)
+
+    def test_restore_schema_uses_compatible_copy(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            root = Path(name)
+            psql = root / "psql"
+            psql.touch()
+            schema = root / "schema.sql"
+            schema.write_text(
+                "SET transaction_timeout = 0;\nCREATE TABLE sample(id integer);\n",
+                encoding="utf-8",
+            )
+            conn = MagicMock()
+            conn.info.get_parameters.return_value = {
+                "host": "127.0.0.1",
+                "port": "5432",
+                "user": "worker",
+                "dbname": "stock",
+            }
+            service = DatabaseArchiveService(conn, tables=())
+
+            with patch("krx_research.cloud_sync.archive.subprocess.run") as run:
+                run.return_value.returncode = 0
+                service._restore_schema(psql, schema)
+
+            command = run.call_args.args[0]
+            restored_schema = Path(command[command.index("--file") + 1])
+            self.assertNotEqual(schema, restored_schema)
+            self.assertNotIn(
+                "transaction_timeout", restored_schema.read_text(encoding="utf-8")
+            )
 
 
 if __name__ == "__main__":
