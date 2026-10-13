@@ -27,6 +27,12 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("verify", help="비밀값 출력 없이 Drive 메타데이터 확인")
     cloud = sub.add_parser("cloud-run", help="GitHub Actions 메뉴 2·5·7 실행")
     cloud.add_argument("--date", type=_date)
+    cloud.add_argument(
+        "--stage",
+        choices=("menu2", "menu5", "menu7", "all"),
+        default="menu2",
+        help="한 번에 저장할 독립 단계(기본: menu2)",
+    )
     return result
 
 
@@ -53,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
             result = service.verify()
         else:
             target = args.date or datetime.now(ZoneInfo("Asia/Seoul")).date()
-            result = service.cloud_run(target)
+            result = service.cloud_run(target, stage=args.stage)
         with log_path.open("a", encoding="utf-8") as log:
             log.write(
                 f"{datetime.now().astimezone().isoformat(timespec='seconds')} "

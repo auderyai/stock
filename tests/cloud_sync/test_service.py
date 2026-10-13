@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 import subprocess
 import unittest
@@ -64,6 +65,50 @@ class CloudSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(2, result)
         run.assert_called_once()
+
+    def test_existing_target_date_continues_to_later_menus(self) -> None:
+        target = date(2026, 10, 12)
+
+        result = StockDriveSyncService._validate_menu2_date(
+            target, target, target, 0
+        )
+
+        self.assertIsNone(result)
+
+    def test_confirmed_holiday_returns_no_new_status(self) -> None:
+        before = date(2026, 10, 8)
+        target = date(2026, 10, 9)
+
+        result = StockDriveSyncService._validate_menu2_date(
+            before, before, target, 2
+        )
+
+        self.assertEqual(
+            {"status": "no-new-trading-day", "requested_date": "2026-10-09"},
+            result,
+        )
+
+    def test_public_result_reports_latest_persisted_stage(self) -> None:
+        result = StockDriveSyncService._public_result(
+            {
+                "state": {"reference_date": "2026-10-12"},
+                "deltas": [{"reference_date": "2026-10-12"}],
+                "completed_stage": "menu5",
+            }
+        )
+
+        self.assertEqual("menu5", result["completed_stage"])
+
+    def test_later_stage_requires_exact_menu2_reference_date(self) -> None:
+        with self.assertRaisesRegex(Exception, "기준일이 준비되지 않았습니다"):
+            StockDriveSyncService._require_reference_date(
+                date(2026, 10, 8), date(2026, 10, 12), "menu5"
+            )
+
+    def test_later_stage_accepts_exact_menu2_reference_date(self) -> None:
+        StockDriveSyncService._require_reference_date(
+            date(2026, 10, 12), date(2026, 10, 12), "menu7"
+        )
 
 
 if __name__ == "__main__":

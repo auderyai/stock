@@ -10,6 +10,15 @@ on:
         description: "거래일(YYYY-MM-DD), 비우면 한국 현재 날짜"
         required: false
         type: string
+      stage:
+        description: "독립 실행 단계"
+        required: false
+        default: "menu2"
+        type: choice
+        options:
+          - menu2
+          - menu5
+          - menu7
 
 concurrency:
   group: stock-daily-google-drive
@@ -56,11 +65,14 @@ jobs:
           cache: pip
       - name: Install worker dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-cloud-worker.txt
-      - name: Run menus 2, 5 and 7
+      - name: Run and persist one database stage
         shell: bash
         run: |
           args=()
           if [[ -n "${{ inputs.target_date }}" ]]; then
             args+=(--date "${{ inputs.target_date }}")
+          fi
+          if [[ -n "${{ inputs.stage }}" ]]; then
+            args+=(--stage "${{ inputs.stage }}")
           fi
           python scripts/stock_drive_sync.py cloud-run "${args[@]}"
