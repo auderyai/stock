@@ -182,7 +182,8 @@ class XingDbMenuService:
         )
 
     def run_menu5(self, *, start: dt.date, end: dt.date, ticker: str | None = None,
-                  max_tickers: int = 0, chunk_days: int = 90, empty_stop_chunks: int = 0,
+                  max_tickers: int = 0, ticker_offset: int = 0,
+                  chunk_days: int = 90, empty_stop_chunks: int = 0,
                   progress: Progress | None = None, enforce_cutoff: bool = True,
                   force_refresh: bool = False) -> ActionReport:
         if start > end:
@@ -199,7 +200,12 @@ class XingDbMenuService:
         started = dt.datetime.now()
         total_complete = total_raw = skipped_complete = request_failures = 0
         refresh_failed: set[str] = set()
-        codes = self._repo.list_stock_codes(ticker, max_tickers)
+        if ticker_offset < 0:
+            raise ValueError("ticker_offset은 0 이상이어야 합니다.")
+        if ticker_offset:
+            codes = self._repo.list_stock_codes(ticker, max_tickers, ticker_offset)
+        else:
+            codes = self._repo.list_stock_codes(ticker, max_tickers)
         trade_days = self._repo.stock_trade_dates_by_code(codes, start, end)
         completed = self._repo.completed_investor_dates_by_code(codes, start, end, "K")
         pending_codes = sum(bool(trade_days.get(code, set()) and
@@ -302,7 +308,11 @@ class XingDbMenuService:
         )
         return ActionReport(
             MenuAction.INVESTOR_RAW, started, dt.datetime.now(), stages,
-            {"start": start.isoformat(), "end": end.isoformat(), "ticker": ticker or "ALL"},
+            {
+                "start": start.isoformat(), "end": end.isoformat(),
+                "ticker": ticker or "ALL", "ticker_offset": str(ticker_offset),
+                "code_count": str(len(codes)),
+            },
         )
 
     def run_menu7(self, *, start: dt.date, end: dt.date, ticker: str | None = None,

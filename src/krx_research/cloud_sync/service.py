@@ -149,11 +149,10 @@ class StockDriveSyncService:
             if stage in {"menu5", "remaining", "all"} and not self._stage_completed(
                 completed_stage, "menu5"
             ):
-                self._run("scripts/update_ls_investor_date_range.py", "--start", day, "--end", day, "--chunk-days", "1")
-                metadata, checkpoint = self._publish_checkpoint(
-                    drive, metadata, work, conninfo, target_date, commit, "menu5"
+                metadata, menu5_checkpoints = self._run_menu5_checkpointed(
+                    drive, metadata, work, conninfo, target_date, commit
                 )
-                checkpoints.append(checkpoint)
+                checkpoints.extend(menu5_checkpoints)
                 completed_stage = "menu5"
                 if stage == "menu5":
                     return {
@@ -246,6 +245,113 @@ class StockDriveSyncService:
             if result != 3:
                 return result
         return self._run("scripts/run_daily_pipeline.py", *arguments, accepted=(0, 2))
+
+    def _run_menu5_checkpointed(
+        self,
+        drive: GoogleDriveClient,
+        metadata: dict[str, Any],
+        work: Path,
+        conninfo: str,
+        target_date: date,
+        commit: str,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Run menu 5 in resumable batches and persist every valid batch."""
+        day = target_date.isoformat()
+        batch_size = max(1, int(os.environ.get("STOCK_DRIVE_MENU5_BATCH_SIZE", "100")))
+        offset = max(0, int(metadata.get("menu5_next_offset") or 0))
+        checkpoints: list[dict[str, Any]] = []
+
+        while True:
+            result = self._run(
+                "scripts/update_ls_investor_date_range.py",
+                "--start", day,
+                "--end", day,
+                "--chunk-days", "1",
+                "--max-tickers", str(batch_size),
+                "--ticker-offset", str(offset),
+                "--empty-is-complete",
+                accepted=(0, 3, 4),
+            )
+            if result == 4:
+                break
+
+            next_offset = offset + batch_size if result == 0 else offset
+            metadata, checkpoint = self._publish_recovery_checkpoint(
+                drive, metadata, work, conninfo, target_date, commit,
+                next_offset=next_offset,
+            )
+            checkpoints.append(checkpoint)
+            if result == 3:
+                raise CloudArchiveError(
+                    f"메뉴 5 묶음 실패: 정상 자료 저장 완료, 다음 재개 위치={offset}"
+                )
+            offset = next_offset
+
+        metadata.pop("menu5_next_offset", None)
+        metadata, checkpoint = self._publish_checkpoint(
+            drive, metadata, work, conninfo, target_date, commit, "menu5"
+        )
+        checkpoints.append(checkpoint)
+        return metadata, checkpoints
+
+    def _publish_recovery_checkpoint(
+        self,
+        drive: GoogleDriveClient,
+        metadata: dict[str, Any],
+        work: Path,
+        conninfo: str,
+        reference_date: date,
+        commit: str,
+        *,
+        next_offset: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Persist a small recoverable delta without rebuilding the full snapshot."""
+        day = reference_date.isoformat()
+        checkpoint_dir = work / f"menu5-partial-{next_offset:07d}"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        with self._connection(conninfo) as conn:
+            delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
+                checkpoint_dir / f"delta-{day}.tar.gz",
+                target_date=reference_date,
+                git_commit=commit,
+            )
+
+        delta_enc = checkpoint_dir / (
+            f"delta-{day}-menu5-partial-{next_offset:07d}-{commit[:12]}.enc"
+        )
+        ArchiveCipher.encrypt(delta.path, delta_enc, self._context.credentials.archive_key)
+        delta_id = drive.upload(
+            delta_enc,
+            name=delta_enc.name,
+            parent_id=str(metadata["delta_folder_id"]),
+        )
+        deltas = [
+            item for item in metadata.get("deltas", [])
+            if item.get("reference_date") != day
+        ]
+        delta_record = self._delta_record(
+            delta_id, delta_enc.name, delta_enc, delta.manifest
+        )
+        delta_record["completed_stage"] = "menu5-partial"
+        delta_record["menu5_next_offset"] = next_offset
+        deltas.append(delta_record)
+        metadata.update(
+            {
+                "deltas": sorted(
+                    deltas, key=lambda item: item["reference_date"]
+                )[-400:],
+                "completed_stage": "menu5-partial",
+                "state_checkpoint_pending": "menu5-partial",
+                "menu5_next_offset": next_offset,
+            }
+        )
+        drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+        return metadata, {
+            "stage": "menu5-partial",
+            "reference_date": day,
+            "delta_rows": self._rows(delta.manifest),
+            "next_offset": next_offset,
+        }
 
     def _publish_checkpoint(
         self,
@@ -486,6 +592,7 @@ class StockDriveSyncService:
             "delta_count": len(metadata.get("deltas", [])),
             "completed_stage": metadata.get("completed_stage"),
             "state_checkpoint_pending": metadata.get("state_checkpoint_pending"),
+            "menu5_next_offset": metadata.get("menu5_next_offset"),
         }
 
 

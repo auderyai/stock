@@ -210,7 +210,8 @@ class PostgreSQLXingMenuRepository:
         ).fetchall()
         return {str(row["sector_code"]).strip() for row in rows if row.get("sector_code")}
 
-    def list_stock_codes(self, ticker: str | None = None, limit: int = 0) -> list[str]:
+    def list_stock_codes(self, ticker: str | None = None, limit: int = 0,
+                         offset: int = 0) -> list[str]:
         if ticker:
             token = str(ticker).strip()
             code = token.zfill(6) if token.isdigit() else ""
@@ -232,7 +233,10 @@ class PostgreSQLXingMenuRepository:
         query = sql.SQL("SELECT DISTINCT {} AS stock_code FROM {} ORDER BY {}").format(stock, table, stock)
         rows = self.conn.execute(query).fetchall()
         codes = [str(r["stock_code"]).zfill(6) for r in rows if str(r["stock_code"]).isdigit()]
-        return codes[:limit] if limit else codes
+        if offset < 0:
+            raise ValueError("offset은 0 이상이어야 합니다.")
+        selected = codes[offset:]
+        return selected[:limit] if limit else selected
 
     def list_stock_trade_dates(self, stock_code: str, start: dt.date, end: dt.date) -> list[dt.date]:
         cols = self._repo._require_ohlcv()

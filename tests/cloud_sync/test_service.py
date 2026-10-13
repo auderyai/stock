@@ -118,6 +118,50 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertTrue(StockDriveSyncService._stage_completed("menu5", "menu5"))
         self.assertTrue(StockDriveSyncService._stage_completed("menu7", "menu5"))
         self.assertFalse(StockDriveSyncService._stage_completed("menu2", "menu5"))
+        self.assertFalse(StockDriveSyncService._stage_completed("menu5-partial", "menu5"))
+
+    def test_menu5_batches_checkpoint_and_finish(self) -> None:
+        root = Path.cwd()
+        credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
+        service = StockDriveSyncService(SyncContext(root, credentials))
+        metadata = {"delta_folder_id": "deltas"}
+
+        with patch.object(service, "_run", side_effect=[0, 0, 4]) as run, patch.object(
+            service, "_publish_recovery_checkpoint",
+            side_effect=[
+                ({**metadata, "menu5_next_offset": 100}, {"stage": "menu5-partial"}),
+                ({**metadata, "menu5_next_offset": 200}, {"stage": "menu5-partial"}),
+            ],
+        ) as partial, patch.object(
+            service, "_publish_checkpoint",
+            return_value=({**metadata, "completed_stage": "menu5"}, {"stage": "menu5"}),
+        ) as final:
+            result_metadata, checkpoints = service._run_menu5_checkpointed(
+                object(), metadata, root, "db", date(2026, 10, 12), "abcdef123456"
+            )
+
+        self.assertEqual(3, run.call_count)
+        self.assertEqual(2, partial.call_count)
+        self.assertEqual(1, final.call_count)
+        self.assertEqual("menu5", result_metadata["completed_stage"])
+        self.assertEqual(["menu5-partial", "menu5-partial", "menu5"], [c["stage"] for c in checkpoints])
+
+    def test_failed_menu5_batch_is_saved_without_advancing_offset(self) -> None:
+        root = Path.cwd()
+        credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
+        service = StockDriveSyncService(SyncContext(root, credentials))
+        metadata = {"delta_folder_id": "deltas", "menu5_next_offset": 300}
+
+        with patch.object(service, "_run", return_value=3), patch.object(
+            service, "_publish_recovery_checkpoint",
+            return_value=(metadata, {"stage": "menu5-partial"}),
+        ) as partial:
+            with self.assertRaisesRegex(CloudArchiveError, "다음 재개 위치=300"):
+                service._run_menu5_checkpointed(
+                    object(), metadata, root, "db", date(2026, 10, 12), "abcdef123456"
+                )
+
+        self.assertEqual(300, partial.call_args.kwargs["next_offset"])
 
     def test_next_date_waits_until_previous_menu7_checkpoint(self) -> None:
         with self.assertRaisesRegex(CloudArchiveError, "이전 기준일 작업이 완료되지 않아"):

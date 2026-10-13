@@ -14,6 +14,8 @@ def main(argv=None):
     p.add_argument("--end",type=dt.date.fromisoformat,required=True)
     p.add_argument("--ticker")
     p.add_argument("--max-tickers",type=int,default=0)
+    p.add_argument("--ticker-offset",type=int,default=0)
+    p.add_argument("--empty-is-complete",action="store_true")
     p.add_argument("--chunk-days",type=int,default=90)
     p.add_argument("--empty-stop-chunks",type=int,default=0)
     p.add_argument("--force-refresh",action="store_true")
@@ -23,10 +25,14 @@ def main(argv=None):
     try:
         with XingDbMenuService(bridge,PostgreSQLXingMenuRepository(application_name="menu5_v41_3")) as svc:
             report=svc.run_menu5(start=args.start,end=args.end,ticker=args.ticker,max_tickers=args.max_tickers,
+                                 ticker_offset=args.ticker_offset,
                                  chunk_days=args.chunk_days,empty_stop_chunks=args.empty_stop_chunks,
                                  progress=lambda m:print(m,flush=True),force_refresh=args.force_refresh)
     except DataProviderUnavailableError as exc:
         print(f"[FAIL] {exc}",flush=True); return 3
+    if args.empty_is_complete and report.metadata.get("code_count") == "0":
+        print("[COMPLETE] 더 처리할 종목이 없습니다.", flush=True)
+        return 4
     for s in report.stages: print(f"{'PASS' if s.passed else 'FAIL'} {s.name}: {s.affected_rows:,}건 {s.message}")
     if args.verification_marker:
         print(f"V41_AFFECTED_ROWS={report.affected_rows}", flush=True)
