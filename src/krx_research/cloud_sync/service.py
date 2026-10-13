@@ -97,7 +97,7 @@ class StockDriveSyncService:
         return {"applied": applied, "already_applied": skipped}
 
     def cloud_run(self, target_date: date, *, stage: str = "menu2") -> dict[str, Any]:
-        if stage not in {"menu2", "menu5", "menu7", "all"}:
+        if stage not in {"menu2", "menu5", "menu7", "remaining", "all"}:
             raise ValueError(f"지원하지 않는 클라우드 단계입니다: {stage}")
         conninfo = database_conninfo()
         with self._context.drive() as drive, tempfile.TemporaryDirectory(prefix="stock-cloud-") as name:
@@ -117,6 +117,7 @@ class StockDriveSyncService:
             commit = self._git_commit()
             checkpoints: list[dict[str, Any]] = []
             actual = before
+            completed_stage = str(metadata.get("completed_stage") or "")
 
             if stage in {"menu2", "all"}:
                 menu2 = self._run_menu2_with_retry(target_date.isoformat())
@@ -141,12 +142,15 @@ class StockDriveSyncService:
             self._require_reference_date(actual, target_date, stage)
             day = target_date.isoformat()
 
-            if stage in {"menu5", "all"}:
+            if stage in {"menu5", "remaining", "all"} and not self._stage_completed(
+                completed_stage, "menu5"
+            ):
                 self._run("scripts/update_ls_investor_date_range.py", "--start", day, "--end", day, "--chunk-days", "1")
                 metadata, checkpoint = self._publish_checkpoint(
                     drive, metadata, work, conninfo, target_date, commit, "menu5"
                 )
                 checkpoints.append(checkpoint)
+                completed_stage = "menu5"
                 if stage == "menu5":
                     return {
                         "status": "updated",
@@ -156,12 +160,30 @@ class StockDriveSyncService:
                         "checkpoints": checkpoints,
                     }
 
-            if stage in {"menu7", "all"}:
+            elif stage == "menu5":
+                return {
+                    "status": "already-complete",
+                    "reference_date": day,
+                    "completed_stage": completed_stage,
+                    "checkpoints": checkpoints,
+                }
+
+            if stage in {"menu7", "remaining", "all"} and not self._stage_completed(
+                completed_stage, "menu7"
+            ):
                 self._run_menu7_with_retry(day)
                 metadata, checkpoint = self._publish_checkpoint(
                     drive, metadata, work, conninfo, target_date, commit, "menu7"
                 )
                 checkpoints.append(checkpoint)
+
+            if not checkpoints:
+                return {
+                    "status": "already-complete",
+                    "reference_date": day,
+                    "completed_stage": completed_stage,
+                    "checkpoints": checkpoints,
+                }
 
             return {
                 "status": "updated",
@@ -326,6 +348,11 @@ class StockDriveSyncService:
                 f"{stage} 실행 전 메뉴 2 기준일이 준비되지 않았습니다: "
                 f"요청={target_date}, DB={actual}"
             )
+
+    @staticmethod
+    def _stage_completed(completed_stage: str, requested_stage: str) -> bool:
+        order = {"": 0, "menu2": 1, "menu5": 2, "menu7": 3}
+        return order.get(completed_stage, 0) >= order[requested_stage]
 
     def _connection(self, conninfo: str | None = None):
         return psycopg.connect(conninfo or database_conninfo(), row_factory=dict_row)

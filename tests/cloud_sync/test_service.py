@@ -110,6 +110,11 @@ class CloudSyncServiceTests(unittest.TestCase):
             date(2026, 10, 12), date(2026, 10, 12), "menu7"
         )
 
+    def test_completed_menu_is_not_run_again(self) -> None:
+        self.assertTrue(StockDriveSyncService._stage_completed("menu5", "menu5"))
+        self.assertTrue(StockDriveSyncService._stage_completed("menu7", "menu5"))
+        self.assertFalse(StockDriveSyncService._stage_completed("menu2", "menu5"))
+
 
 if __name__ == "__main__":
     unittest.main()

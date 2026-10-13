@@ -29,7 +29,7 @@ def parser() -> argparse.ArgumentParser:
     cloud.add_argument("--date", type=_date)
     cloud.add_argument(
         "--stage",
-        choices=("menu2", "menu5", "menu7", "all"),
+        choices=("menu2", "menu5", "menu7", "remaining", "all"),
         default="menu2",
         help="한 번에 저장할 독립 단계(기본: menu2)",
     )

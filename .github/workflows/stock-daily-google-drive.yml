@@ -19,6 +19,7 @@ on:
           - menu2
           - menu5
           - menu7
+          - remaining
 
 concurrency:
   group: stock-daily-google-drive
