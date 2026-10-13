@@ -121,8 +121,13 @@ def command_update(args: argparse.Namespace) -> int:
                 "[ERROR] 갱신 후 PostgreSQL 가격 기준일이 목표일보다 이전입니다: "
                 f"DB={database_latest}, 목표={target_date.isoformat()}"
             )
-            return 2
-    return 0 if result.metadata.get("status", "completed") == "completed" else 2
+            # Exit 2 is reserved for a confirmed historical no-data day so the
+            # cloud coordinator can safely treat it as a market holiday.  A
+            # provider failure or a still-retryable current-day response must
+            # fail the workflow instead of being reported as a successful
+            # ``no-new-trading-day`` run.
+            return 3 if result.metadata.get("status") == "partial" else 2
+    return 0 if result.metadata.get("status", "completed") == "completed" else 3
 
 
 def command_backfill_investor(args: argparse.Namespace) -> int:

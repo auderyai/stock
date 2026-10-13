@@ -112,12 +112,7 @@ class StockDriveSyncService:
                 archive_service.restore_snapshot(state_archive, psql=self._executable("psql"))
                 before = self._latest_date(conn)
 
-            menu2 = self._run(
-                "scripts/run_daily_pipeline.py",
-                "--as-of", target_date.isoformat(),
-                "--no-investor", "--markets", "KOSPI", "KOSDAQ",
-                accepted=(0, 2),
-            )
+            menu2 = self._run_menu2_with_retry(target_date.isoformat())
             with self._connection(conninfo) as conn:
                 actual = self._latest_date(conn)
             if actual is None or actual <= before:
@@ -199,6 +194,19 @@ class StockDriveSyncService:
         )
         if result == 3:
             self._run("scripts/run_xing_db_menu.py", *arguments)
+
+    def _run_menu2_with_retry(self, day: str) -> int:
+        arguments = (
+            "--as-of", day,
+            "--no-investor", "--markets", "KOSPI", "KOSDAQ",
+        )
+        for _ in range(2):
+            result = self._run(
+                "scripts/run_daily_pipeline.py", *arguments, accepted=(0, 2, 3)
+            )
+            if result != 3:
+                return result
+        return self._run("scripts/run_daily_pipeline.py", *arguments, accepted=(0, 2))
 
     def _connection(self, conninfo: str | None = None):
         return psycopg.connect(conninfo or database_conninfo(), row_factory=dict_row)
