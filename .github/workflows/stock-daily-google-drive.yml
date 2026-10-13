@@ -73,7 +73,9 @@ jobs:
           if [[ -n "${{ inputs.target_date }}" ]]; then
             args+=(--date "${{ inputs.target_date }}")
           fi
-          if [[ -n "${{ inputs.stage }}" ]]; then
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            args+=(--stage all)
+          elif [[ -n "${{ inputs.stage }}" ]]; then
             args+=(--stage "${{ inputs.stage }}")
           fi
           python scripts/stock_drive_sync.py cloud-run "${args[@]}"
