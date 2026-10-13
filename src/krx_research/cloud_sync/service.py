@@ -112,6 +112,7 @@ class StockDriveSyncService:
             with self._connection(conninfo) as conn:
                 archive_service = DatabaseArchiveService(conn, conninfo=conninfo)
                 archive_service.restore_snapshot(state_archive, psql=self._executable("psql"))
+                self._apply_cloud_deltas(drive, metadata, work, conn)
                 before = self._latest_date(conn)
 
             commit = self._git_commit()
@@ -257,35 +258,22 @@ class StockDriveSyncService:
         day = reference_date.isoformat()
         checkpoint_dir = work / stage
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        # Publish the small daily delta first.  If pg_dump or the state upload
+        # fails afterwards, the completed menu remains recoverable and the
+        # next worker can rebuild from the previous state plus this delta.
         with self._connection(conninfo) as conn:
-            exporter = DatabaseArchiveService(conn, conninfo=conninfo)
-            delta = exporter.export_delta(
+            delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
                 checkpoint_dir / f"delta-{day}.tar.gz",
                 target_date=reference_date,
                 git_commit=commit,
             )
-            state = exporter.export_snapshot(
-                checkpoint_dir / "next-state.tar.gz",
-                pg_dump=self._executable("pg_dump"),
-                reference_date=reference_date,
-                git_commit=commit,
-            )
 
         delta_enc = checkpoint_dir / f"delta-{day}-{stage}-{commit[:12]}.enc"
-        next_slot = "b" if metadata.get("state_slot") == "a" else "a"
-        state_enc = checkpoint_dir / f"worker-state-{next_slot}.enc"
         ArchiveCipher.encrypt(delta.path, delta_enc, self._context.credentials.archive_key)
-        ArchiveCipher.encrypt(state.path, state_enc, self._context.credentials.archive_key)
-
         delta_id = drive.upload(
             delta_enc,
             name=delta_enc.name,
             parent_id=str(metadata["delta_folder_id"]),
-        )
-        state_id = drive.upload(
-            state_enc,
-            name=state_enc.name,
-            parent_id=drive.ensure_folder("worker-state"),
         )
         deltas = [
             item for item in metadata.get("deltas", [])
@@ -298,22 +286,72 @@ class StockDriveSyncService:
         deltas.append(delta_record)
         metadata.update(
             {
-                "state": self._state_record(
-                    state_id, state_enc.name, state_enc, state.manifest
-                ),
-                "state_slot": next_slot,
                 "deltas": sorted(
                     deltas, key=lambda item: item["reference_date"]
                 )[-400:],
                 "completed_stage": stage,
+                "state_checkpoint_pending": stage,
             }
         )
+        drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+
+        with self._connection(conninfo) as conn:
+            state = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
+                checkpoint_dir / "next-state.tar.gz",
+                pg_dump=self._executable("pg_dump"),
+                reference_date=reference_date,
+                git_commit=commit,
+            )
+        next_slot = "b" if metadata.get("state_slot") == "a" else "a"
+        state_enc = checkpoint_dir / f"worker-state-{next_slot}.enc"
+        ArchiveCipher.encrypt(state.path, state_enc, self._context.credentials.archive_key)
+        state_id = drive.upload(
+            state_enc,
+            name=state_enc.name,
+            parent_id=drive.ensure_folder("worker-state"),
+        )
+        metadata.update(
+            {
+                "state": self._state_record(
+                    state_id, state_enc.name, state_enc, state.manifest
+                ),
+                "state_slot": next_slot,
+            }
+        )
+        metadata.pop("state_checkpoint_pending", None)
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
         return metadata, {
             "stage": stage,
             "reference_date": day,
             "delta_rows": self._rows(delta.manifest),
         }
+
+    def _apply_cloud_deltas(
+        self,
+        drive: GoogleDriveClient,
+        metadata: dict[str, Any],
+        work: Path,
+        conn,
+    ) -> None:
+        """Rebuild state when a delta was saved before a state checkpoint failed."""
+        state_reference = date.fromisoformat(str(metadata["state"]["reference_date"]))
+        delta_dir = work / "restore-deltas"
+        delta_dir.mkdir(parents=True, exist_ok=True)
+        applier = DeltaArchiveApplier(conn)
+        for record in sorted(
+            metadata.get("deltas", []), key=lambda item: item["reference_date"]
+        ):
+            if date.fromisoformat(str(record["reference_date"])) < state_reference:
+                continue
+            encrypted = drive.download(
+                str(record["id"]), delta_dir / str(record["name"])
+            )
+            self._verify_download(encrypted, record)
+            archive = delta_dir / (encrypted.stem + ".tar.gz")
+            ArchiveCipher.decrypt(
+                encrypted, archive, self._context.credentials.archive_key
+            )
+            applier.apply(archive)
 
     @staticmethod
     def _validate_menu2_date(
@@ -424,6 +462,7 @@ class StockDriveSyncService:
             "state_reference_date": state.get("reference_date"),
             "delta_count": len(metadata.get("deltas", [])),
             "completed_stage": metadata.get("completed_stage"),
+            "state_checkpoint_pending": metadata.get("state_checkpoint_pending"),
         }
 
 

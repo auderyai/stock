@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 355
     services:
       postgres:
-        image: postgres:18
+        image: postgres:16
         env:
           POSTGRES_DB: krx_research
           POSTGRES_USER: stock_worker
