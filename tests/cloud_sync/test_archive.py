@@ -6,7 +6,12 @@ import tarfile
 import tempfile
 import unittest
 
-from krx_research.cloud_sync.archive import ArchiveCipher, CloudArchiveError, _extracted_archive
+from krx_research.cloud_sync.archive import (
+    ArchiveCipher,
+    CloudArchiveError,
+    DatabaseArchiveService,
+    _extracted_archive,
+)
 
 
 class ArchiveCipherTests(unittest.TestCase):
@@ -38,6 +43,24 @@ class ArchiveCipherTests(unittest.TestCase):
             with self.assertRaises(CloudArchiveError):
                 with _extracted_archive(archive):
                     pass
+
+    def test_postgres_18_transaction_timeout_is_removed_for_restore(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            schema = Path(name) / "schema.sql"
+            schema.write_text(
+                "SET statement_timeout = 0;\n"
+                "SET transaction_timeout = 0;\n"
+                "CREATE TABLE sample(id integer);\n",
+                encoding="utf-8",
+            )
+
+            compatible = DatabaseArchiveService._compatible_restore_schema(schema)
+
+            self.assertNotEqual(schema, compatible)
+            text = compatible.read_text(encoding="utf-8")
+            self.assertNotIn("transaction_timeout", text)
+            self.assertIn("statement_timeout", text)
+            self.assertIn("CREATE TABLE", text)
 
 
 if __name__ == "__main__":

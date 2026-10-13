@@ -246,6 +246,7 @@ class DatabaseArchiveService:
     def _dump_schema(self, executable: Path, output: Path) -> None:
         if not executable.is_file():
             raise CloudArchiveError(f"pg_dump 실행 파일이 없습니다: {executable}")
+        schema = self._compatible_restore_schema(schema)
         parameters = self._parameters()
         environment = os.environ.copy()
         if parameters.get("password"):
@@ -314,6 +315,21 @@ class DatabaseArchiveService:
                 f"작업 상태 스키마 복원 실패: psql 종료코드 {completed.returncode}"
                 + (f" ({detail})" if detail else "")
             )
+
+    @staticmethod
+    def _compatible_restore_schema(schema: Path) -> Path:
+        """Remove newer-server session settings unsupported by PostgreSQL 16."""
+        source = schema.read_text(encoding="utf-8")
+        lines = source.splitlines(keepends=True)
+        compatible = [
+            line for line in lines
+            if not line.lstrip().startswith("SET transaction_timeout =")
+        ]
+        if len(compatible) == len(lines):
+            return schema
+        target = schema.with_name("schema-compatible.sql")
+        target.write_text("".join(compatible), encoding="utf-8")
+        return target
 
     def _latest_market_date(self) -> date:
         row = self._conn.execute(
