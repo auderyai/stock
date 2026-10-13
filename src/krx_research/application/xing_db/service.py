@@ -25,6 +25,7 @@ class XingDbMenuService:
     _INDEX_COUNT_TOLERANCE = 5
     _LS_QUALIFIED_LOOKBACK_DAYS = 45
     _T1702_REPAIR_PASSES = 3
+    _T8451_REPAIR_PASSES = 3
     _VENUE_CODE = {"KRX": "K", "NXT": "N", "COMBINED": "U"}
 
     def __init__(self, bridge: RawTrPort, repository: XingMenuRepositoryPort) -> None:
@@ -385,6 +386,55 @@ class XingDbMenuService:
             if pos % 100 == 0: self._emit(progress, f"[PROGRESS] {pos:,}/{len(codes):,}종목 처리")
 
         verified = self._repo.venue_trade_dates_by_code(codes, venue_names, start, end)
+        for repair_pass in range(1, self._T8451_REPAIR_PASSES + 1):
+            unresolved: dict[tuple[str, str], set[dt.date]] = {}
+            for code in codes:
+                base_days = base_by_code.get(code, set())
+                for venue in venue_names:
+                    key = (code, venue)
+                    expected = base_days if venue == "COMBINED" else received.get(key, set())
+                    missing = expected - verified.get(key, set())
+                    if missing or key in request_errors:
+                        unresolved[key] = missing
+            if not unresolved:
+                break
+            self._emit(
+                progress,
+                f"[REPAIR {repair_pass}/{self._T8451_REPAIR_PASSES}] "
+                f"t8451 누락·요청실패 {len(unresolved):,}종목/시장만 재수집",
+            )
+            for (code, venue), missing in unresolved.items():
+                logical_start = min(missing) if missing else start
+                request_start = self._expanded_request_start(logical_start, end)
+                try:
+                    raw_rows = self._rows(
+                        "t8451",
+                        {
+                            "shcode": code,
+                            "gubun": "2",
+                            "qrycnt": "2000",
+                            "sdate": request_start.strftime("%Y%m%d"),
+                            "edate": end.strftime("%Y%m%d"),
+                            "cts_date": "",
+                            "comp_yn": "N",
+                            "sujung": "N",
+                            "exchgubun": self._VENUE_CODE[venue],
+                        },
+                        allow_empty=True,
+                    )
+                    rows = self._filter_rows_by_date(raw_rows, start, end)
+                    daily_count += self._repo.upsert_venue_daily(code, venue, rows)
+                    dates = {
+                        dt.datetime.strptime(str(row["date"]), "%Y%m%d").date()
+                        for row in rows
+                    }
+                    if dates:
+                        received.setdefault((code, venue), set()).update(dates)
+                    request_errors.pop((code, venue), None)
+                except Exception as exc:
+                    request_errors[(code, venue)] = f"{type(exc).__name__}: {exc}"
+            verified = self._repo.venue_trade_dates_by_code(codes, venue_names, start, end)
+
         failures = 0; unresolved_keys: set[tuple[str, str]] = set()
         for code in codes:
             base_days = base_by_code.get(code, set())

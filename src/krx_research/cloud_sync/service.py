@@ -131,10 +131,7 @@ class StockDriveSyncService:
 
             day = actual.isoformat()
             self._run("scripts/update_ls_investor_date_range.py", "--start", day, "--end", day, "--chunk-days", "1")
-            self._run(
-                "scripts/run_xing_db_menu.py", "--menu", "7", "--start", day, "--end", day,
-                "--no-investor",
-            )
+            self._run_menu7_with_retry(day)
 
             commit = self._git_commit()
             with self._connection(conninfo) as conn:
@@ -194,6 +191,14 @@ class StockDriveSyncService:
         if completed.returncode not in accepted:
             raise CloudArchiveError(f"작업 실패: {script}, 종료코드={completed.returncode}")
         return completed.returncode
+
+    def _run_menu7_with_retry(self, day: str) -> None:
+        arguments = ("--menu", "7", "--start", day, "--end", day, "--no-investor")
+        result = self._run(
+            "scripts/run_xing_db_menu.py", *arguments, accepted=(0, 3)
+        )
+        if result == 3:
+            self._run("scripts/run_xing_db_menu.py", *arguments)
 
     def _connection(self, conninfo: str | None = None):
         return psycopg.connect(conninfo or database_conninfo(), row_factory=dict_row)
