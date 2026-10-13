@@ -119,6 +119,9 @@ class StockDriveSyncService:
             checkpoints: list[dict[str, Any]] = []
             actual = before
             completed_stage = str(metadata.get("completed_stage") or "")
+            self._require_previous_date_completed(
+                before, target_date, completed_stage, stage
+            )
 
             if stage in {"menu2", "all"}:
                 menu2 = self._run_menu2_with_retry(target_date.isoformat())
@@ -391,6 +394,26 @@ class StockDriveSyncService:
     def _stage_completed(completed_stage: str, requested_stage: str) -> bool:
         order = {"": 0, "menu2": 1, "menu5": 2, "menu7": 3}
         return order.get(completed_stage, 0) >= order[requested_stage]
+
+    @staticmethod
+    def _require_previous_date_completed(
+        current_date: date | None,
+        target_date: date,
+        completed_stage: str,
+        requested_stage: str,
+    ) -> None:
+        """Do not advance the cloud state while the prior date is incomplete."""
+        if (
+            requested_stage in {"menu2", "all"}
+            and current_date is not None
+            and current_date < target_date
+            and completed_stage != "menu7"
+        ):
+            raise CloudArchiveError(
+                "이전 기준일 작업이 완료되지 않아 다음 날짜를 시작할 수 없습니다: "
+                f"이전={current_date.isoformat()}, 완료단계={completed_stage or '없음'}, "
+                f"요청={target_date.isoformat()}"
+            )
 
     def _connection(self, conninfo: str | None = None):
         return psycopg.connect(conninfo or database_conninfo(), row_factory=dict_row)

@@ -8,7 +8,11 @@ import unittest
 from unittest.mock import patch
 
 from krx_research.cloud_sync.credentials import DriveCredentials
-from krx_research.cloud_sync.service import StockDriveSyncService, SyncContext
+from krx_research.cloud_sync.service import (
+    CloudArchiveError,
+    StockDriveSyncService,
+    SyncContext,
+)
 
 
 class CloudSyncServiceTests(unittest.TestCase):
@@ -114,6 +118,17 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertTrue(StockDriveSyncService._stage_completed("menu5", "menu5"))
         self.assertTrue(StockDriveSyncService._stage_completed("menu7", "menu5"))
         self.assertFalse(StockDriveSyncService._stage_completed("menu2", "menu5"))
+
+    def test_next_date_waits_until_previous_menu7_checkpoint(self) -> None:
+        with self.assertRaisesRegex(CloudArchiveError, "이전 기준일 작업이 완료되지 않아"):
+            StockDriveSyncService._require_previous_date_completed(
+                date(2026, 10, 12), date(2026, 10, 13), "menu5", "menu2"
+            )
+
+    def test_next_date_starts_after_previous_menu7_checkpoint(self) -> None:
+        StockDriveSyncService._require_previous_date_completed(
+            date(2026, 10, 12), date(2026, 10, 13), "menu7", "menu2"
+        )
 
 
 if __name__ == "__main__":
