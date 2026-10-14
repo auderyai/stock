@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 from pathlib import Path
 import tarfile
 import tempfile
@@ -11,6 +12,7 @@ from krx_research.cloud_sync.archive import (
     ArchiveCipher,
     CloudArchiveError,
     DatabaseArchiveService,
+    DeltaArchiveApplier,
     _extracted_archive,
 )
 
@@ -92,6 +94,48 @@ class ArchiveCipherTests(unittest.TestCase):
             self.assertNotIn(
                 "transaction_timeout", restored_schema.read_text(encoding="utf-8")
             )
+
+    def test_delta_history_lookup_runs_inside_apply_transaction(self) -> None:
+        class Connection:
+            depth = 0
+
+            @contextmanager
+            def transaction(self):
+                self.depth += 1
+                try:
+                    yield
+                finally:
+                    self.depth -= 1
+
+            def execute(self, statement, parameters=None):
+                if str(statement).startswith("SELECT 1"):
+                    self.assert_in_transaction()
+                    return MagicMock(fetchone=lambda: None)
+                return MagicMock()
+
+            def assert_in_transaction(self):
+                if not self.depth:
+                    raise AssertionError("history lookup escaped the apply transaction")
+
+        connection = Connection()
+        manifest = {
+            "batch_id": "2026-10-13-test",
+            "reference_date": "2026-10-13",
+            "tables": [],
+        }
+        applier = DeltaArchiveApplier(connection, tables=())
+        with (
+            patch("krx_research.cloud_sync.archive._extracted_archive") as extracted,
+            patch(
+                "krx_research.cloud_sync.archive._load_and_verify_manifest",
+                return_value=manifest,
+            ),
+        ):
+            extracted.return_value.__enter__.return_value = Path.cwd()
+            result = applier.apply(Path("unused.tar.gz"))
+
+        self.assertEqual("applied", result["apply_status"])
+        self.assertEqual(0, connection.depth)
 
 
 if __name__ == "__main__":

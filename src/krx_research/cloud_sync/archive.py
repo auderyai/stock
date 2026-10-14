@@ -373,9 +373,9 @@ class DeltaArchiveApplier:
             manifest = _load_and_verify_manifest(extracted, expected_kind="daily-delta")
             self._ensure_history_table()
             batch_id = str(manifest["batch_id"])
-            if self._already_applied(batch_id):
-                return {**manifest, "apply_status": "already-applied"}
             with self._conn.transaction():
+                if self._already_applied(batch_id):
+                    return {**manifest, "apply_status": "already-applied"}
                 for item in manifest["tables"]:
                     self._apply_table(extracted, item)
                 self._conn.execute(
