@@ -2,8 +2,8 @@ name: Stock daily DB update to Google Drive
 
 on:
   schedule:
-    - cron: "37 20 * * 1-5"
-      timezone: "Asia/Seoul"
+    # GitHub cron is UTC: 11:37 UTC = 20:37 KST.
+    - cron: "37 11 * * 1-5"
   workflow_dispatch:
     inputs:
       target_date:
