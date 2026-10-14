@@ -27,6 +27,17 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn("workflow_call:", stage_workflow)
         self.assertIn('args=(--stage "${{ inputs.stage }}")', stage_workflow)
 
+    def test_failure_signal_creates_issue_only_for_failed_run(self) -> None:
+        workflow = (ROOT / ".github/workflows/stock-drive-failure-signal.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('workflows: ["Stock daily DB update to Google Drive"]', workflow)
+        self.assertIn("github.event.workflow_run.conclusion == 'failure'", workflow)
+        self.assertIn("issues: write", workflow)
+        self.assertIn("gh issue create", workflow)
+        self.assertIn("github.event.workflow_run.html_url", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

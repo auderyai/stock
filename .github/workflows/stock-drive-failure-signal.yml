@@ -1,0 +1,24 @@
+name: Stock Drive failure signal
+
+on:
+  workflow_run:
+    workflows: ["Stock daily DB update to Google Drive"]
+    types: [completed]
+
+permissions:
+  issues: write
+
+jobs:
+  signal:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: >-
+          gh issue create --repo "$GITHUB_REPOSITORY"
+          --title "Stock Drive 실패: run $RUN_ID"
+          --body "Stock Drive 자동 실행이 실패했습니다. 실행 로그: $RUN_URL"
