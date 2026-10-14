@@ -120,6 +120,7 @@ class StockDriveSyncService:
                 archive_service.restore_snapshot(state_archive, psql=self._executable("psql"))
                 self._apply_cloud_deltas(drive, metadata, work, conn)
                 before = self._latest_date(conn)
+                menu5_complete = self._menu5_complete(conn, target_date)
 
             commit = self._git_commit()
             checkpoints: list[dict[str, Any]] = []
@@ -155,8 +156,9 @@ class StockDriveSyncService:
             self._require_stage_base(actual, target_date, stage)
             day = target_date.isoformat()
 
-            if stage in {"menu5", "remaining", "all"} and not self._stage_completed(
-                completed_stage, "menu5"
+            if stage in {"menu5", "remaining", "all"} and (
+                not self._stage_completed(completed_stage, "menu5")
+                or not menu5_complete
             ):
                 metadata, menu5_checkpoints = self._run_menu5_checkpointed(
                     drive, metadata, work, conninfo, target_date, commit,
@@ -274,7 +276,11 @@ class StockDriveSyncService:
         """Run menu 5 in resumable batches and persist every valid batch."""
         day = target_date.isoformat()
         batch_size = max(1, int(os.environ.get("STOCK_DRIVE_MENU5_BATCH_SIZE", "100")))
-        offset = max(0, int(metadata.get("menu5_next_offset") or 0))
+        offset = (
+            max(0, int(metadata.get("menu5_next_offset") or 0))
+            if metadata.get("menu5_reference_date") == day
+            else 0
+        )
         checkpoints: list[dict[str, Any]] = []
 
         while True:
@@ -312,6 +318,7 @@ class StockDriveSyncService:
             offset = next_offset
 
         metadata.pop("menu5_next_offset", None)
+        metadata.pop("menu5_reference_date", None)
         metadata, checkpoint = self._publish_checkpoint(
             drive, metadata, work, conninfo, target_date, commit, "menu5",
             state_reference_date=state_reference_date,
@@ -369,6 +376,7 @@ class StockDriveSyncService:
                 "completed_stage": stage,
                 "state_checkpoint_pending": "menu5-partial",
                 "menu5_next_offset": next_offset,
+                "menu5_reference_date": day,
             }
         )
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
@@ -643,6 +651,20 @@ class StockDriveSyncService:
         return row["day"] if row else None
 
     @staticmethod
+    def _menu5_complete(conn, target_date: date) -> bool:
+        row = conn.execute(
+            """WITH target AS (
+                   SELECT DISTINCT ticker::text AS stock_code
+                   FROM market.ohlcv_daily WHERE trade_date::date=%s)
+               SELECT count(*) AS targets, count(done.stock_code) AS completed
+               FROM target LEFT JOIN market_core.ls_investor_t1702_checkpoint done
+                 ON done.stock_code=target.stock_code
+                AND done.trade_date=%s AND done.exchange_code='K'""",
+            (target_date, target_date),
+        ).fetchone()
+        return bool(row and row["targets"] and row["targets"] == row["completed"])
+
+    @staticmethod
     def _executable(name: str) -> Path:
         found = shutil.which(name)
         if found:
@@ -698,6 +720,7 @@ class StockDriveSyncService:
             "completed_stage": metadata.get("completed_stage"),
             "state_checkpoint_pending": metadata.get("state_checkpoint_pending"),
             "menu5_next_offset": metadata.get("menu5_next_offset"),
+            "menu5_reference_date": metadata.get("menu5_reference_date"),
         }
 
 

@@ -184,6 +184,8 @@ class CloudSyncServiceTests(unittest.TestCase):
         ), patch.object(
             service, "_latest_date", return_value=target
         ), patch.object(
+            service, "_menu5_complete", return_value=False
+        ), patch.object(
             service, "_git_commit", return_value="abcdef123456"
         ), patch.object(
             service,
@@ -199,7 +201,11 @@ class CloudSyncServiceTests(unittest.TestCase):
         root = Path.cwd()
         credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
         service = StockDriveSyncService(SyncContext(root, credentials))
-        metadata = {"delta_folder_id": "deltas", "menu5_next_offset": 300}
+        metadata = {
+            "delta_folder_id": "deltas",
+            "menu5_next_offset": 300,
+            "menu5_reference_date": "2026-10-12",
+        }
 
         with patch.object(service, "_run", side_effect=[3, 3]), patch.object(
             service, "_publish_recovery_checkpoint",
@@ -212,6 +218,44 @@ class CloudSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(300, partial.call_args.kwargs["next_offset"])
         self.assertEqual(2, partial.call_count)
+
+    def test_menu5_offset_is_scoped_to_reference_date(self) -> None:
+        root = Path.cwd()
+        service = StockDriveSyncService(SyncContext(
+            root, DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        metadata = {
+            "delta_folder_id": "deltas",
+            "menu5_next_offset": 2700,
+            "menu5_reference_date": "2026-10-12",
+        }
+
+        with patch.object(service, "_run", return_value=4) as run, patch.object(
+            service,
+            "_publish_checkpoint",
+            return_value=({**metadata, "completed_stage": "menu5"}, {"stage": "menu5"}),
+        ):
+            service._run_menu5_checkpointed(
+                object(), metadata, root, "db", date(2026, 10, 13), "abcdef123456"
+            )
+
+        arguments = run.call_args.args
+        self.assertEqual("0", arguments[arguments.index("--ticker-offset") + 1])
+
+    def test_menu5_completion_requires_every_target_code(self) -> None:
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = {
+            "targets": 2674,
+            "completed": 2673,
+        }
+        self.assertFalse(
+            StockDriveSyncService._menu5_complete(connection, date(2026, 10, 13))
+        )
+
+        connection.execute.return_value.fetchone.return_value["completed"] = 2674
+        self.assertTrue(
+            StockDriveSyncService._menu5_complete(connection, date(2026, 10, 13))
+        )
 
     def test_next_date_waits_until_previous_menu7_checkpoint(self) -> None:
         with self.assertRaisesRegex(CloudArchiveError, "이전 기준일 작업이 완료되지 않아"):
