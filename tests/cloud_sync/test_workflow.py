@@ -38,6 +38,18 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn("gh issue create", workflow)
         self.assertIn("github.event.workflow_run.html_url", workflow)
 
+    def test_manual_run_continues_from_selected_checkpoint(self) -> None:
+        workflow = (ROOT / ".github/workflows/stock-daily-google-drive.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("manual-menu2:", workflow)
+        self.assertIn("manual-menu5:", workflow)
+        self.assertIn("needs: manual-menu2", workflow)
+        self.assertIn("manual-menu7:", workflow)
+        self.assertIn("needs: [manual-menu2, manual-menu5]", workflow)
+        self.assertIn("needs.manual-menu5.result == 'success'", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

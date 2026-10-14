@@ -29,12 +29,44 @@ permissions:
   contents: read
 
 jobs:
-  manual:
-    if: github.event_name == 'workflow_dispatch'
+  manual-menu2:
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'menu2'
     uses: ./.github/workflows/stock-drive-stage.yml
     with:
       target_date: ${{ inputs.target_date }}
-      stage: ${{ inputs.stage }}
+      stage: menu2
+    secrets: inherit
+
+  manual-menu5:
+    needs: manual-menu2
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' &&
+      (inputs.stage == 'menu5' ||
+      (inputs.stage == 'menu2' && needs.manual-menu2.result == 'success'))
+    uses: ./.github/workflows/stock-drive-stage.yml
+    with:
+      target_date: ${{ inputs.target_date }}
+      stage: menu5
+    secrets: inherit
+
+  manual-menu7:
+    needs: [manual-menu2, manual-menu5]
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' &&
+      (inputs.stage == 'menu7' ||
+      (inputs.stage != 'menu7' && needs.manual-menu5.result == 'success'))
+    uses: ./.github/workflows/stock-drive-stage.yml
+    with:
+      target_date: ${{ inputs.target_date }}
+      stage: menu7
+    secrets: inherit
+
+  manual-remaining:
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'remaining'
+    uses: ./.github/workflows/stock-drive-stage.yml
+    with:
+      target_date: ${{ inputs.target_date }}
+      stage: remaining
     secrets: inherit
 
   scheduled-menu2:
