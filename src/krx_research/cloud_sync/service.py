@@ -159,7 +159,7 @@ class StockDriveSyncService:
                         "status": "updated",
                         "reference_date": day,
                         "completed_stage": "menu5",
-                        "delta_rows": checkpoint["delta_rows"],
+                        "delta_rows": menu5_checkpoints[-1]["delta_rows"],
                         "checkpoints": checkpoints,
                     }
 

@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from krx_research.cloud_sync.credentials import DriveCredentials
 from krx_research.cloud_sync.service import (
@@ -145,6 +145,45 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual(1, final.call_count)
         self.assertEqual("menu5", result_metadata["completed_stage"])
         self.assertEqual(["menu5-partial", "menu5-partial", "menu5"], [c["stage"] for c in checkpoints])
+
+    def test_cloud_menu5_returns_final_checkpoint_rows(self) -> None:
+        target = date(2026, 10, 12)
+        root = Path.cwd()
+        credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
+        service = StockDriveSyncService(SyncContext(root, credentials))
+        drive = MagicMock()
+        drive.__enter__.return_value = drive
+        connection = MagicMock()
+        connection.__enter__.return_value = MagicMock()
+        metadata = {
+            "state": {"id": "state", "name": "state.enc"},
+            "completed_stage": "menu2",
+        }
+        completed = {**metadata, "completed_stage": "menu5"}
+
+        with patch.object(SyncContext, "drive", return_value=drive), patch.object(
+            service, "_metadata", return_value=metadata
+        ), patch.object(service, "_verify_download"), patch(
+            "krx_research.cloud_sync.service.ArchiveCipher.decrypt"
+        ), patch(
+            "krx_research.cloud_sync.service.DatabaseArchiveService"
+        ), patch.object(
+            service, "_connection", return_value=connection
+        ), patch.object(
+            service, "_apply_cloud_deltas"
+        ), patch.object(
+            service, "_latest_date", return_value=target
+        ), patch.object(
+            service, "_git_commit", return_value="abcdef123456"
+        ), patch.object(
+            service,
+            "_run_menu5_checkpointed",
+            return_value=(completed, [{"stage": "menu5", "delta_rows": 7}]),
+        ):
+            result = service.cloud_run(target, stage="menu5")
+
+        self.assertEqual("menu5", result["completed_stage"])
+        self.assertEqual(7, result["delta_rows"])
 
     def test_failed_menu5_batch_is_saved_without_advancing_offset(self) -> None:
         root = Path.cwd()
