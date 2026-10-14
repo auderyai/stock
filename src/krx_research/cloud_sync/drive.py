@@ -52,7 +52,8 @@ class GoogleDriveClient:
         found = self.find(name, parent)
         if found:
             return str(found["id"])
-        response = self._session.post(
+        response = self._request(
+            "post",
             f"{DRIVE_API}/files",
             params={"fields": "id"},
             json={
@@ -66,7 +67,8 @@ class GoogleDriveClient:
 
     def find(self, name: str, parent_id: str) -> dict[str, Any] | None:
         escaped = name.replace("'", "\\'")
-        response = self._session.get(
+        response = self._request(
+            "get",
             f"{DRIVE_API}/files",
             params={
                 "q": f"name = '{escaped}' and '{parent_id}' in parents and trashed = false",
@@ -91,7 +93,9 @@ class GoogleDriveClient:
             }
             if page_token:
                 params["pageToken"] = page_token
-            response = self._session.get(f"{DRIVE_API}/files", params=params, timeout=30)
+            response = self._request(
+                "get", f"{DRIVE_API}/files", params=params, timeout=30
+            )
             payload = self._json(response, "Drive 폴더 목록 조회")
             files.extend(dict(item) for item in payload.get("files", []))
             page_token = str(payload.get("nextPageToken") or "") or None
@@ -106,11 +110,11 @@ class GoogleDriveClient:
             if file_id
             else f"{DRIVE_UPLOAD_API}/files"
         )
-        method = self._session.patch if file_id else self._session.post
         metadata: dict[str, Any] = {"name": name}
         if not file_id:
             metadata["parents"] = [parent_id]
-        initiated = method(
+        initiated = self._request(
+            "patch" if file_id else "post",
             endpoint,
             params={"uploadType": "resumable", "fields": "id,size,md5Checksum"},
             headers={
@@ -141,7 +145,8 @@ class GoogleDriveClient:
         return str(payload["id"])
 
     def download(self, file_id: str, target: Path) -> Path:
-        response = self._session.get(
+        response = self._request(
+            "get",
             f"{DRIVE_API}/files/{file_id}", params={"alt": "media"}, stream=True, timeout=900
         )
         self._require_success(response, "Drive 파일 다운로드")
@@ -158,7 +163,8 @@ class GoogleDriveClient:
         found = self.find(name, parent_id)
         if not found:
             return None
-        response = self._session.get(
+        response = self._request(
+            "get",
             f"{DRIVE_API}/files/{found['id']}", params={"alt": "media"}, timeout=30
         )
         payload = self._json(response, "Drive JSON 다운로드")
@@ -190,6 +196,14 @@ class GoogleDriveClient:
         if not token:
             raise GoogleDriveError("Google OAuth 접근 토큰이 없습니다.")
         self._session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        """Retry one Drive request after refreshing an expired access token."""
+        response = getattr(self._session, method)(url, **kwargs)
+        if response.status_code == 401:
+            self._authenticate()
+            response = getattr(self._session, method)(url, **kwargs)
+        return response
 
     @classmethod
     def _json(cls, response: requests.Response, operation: str) -> dict[str, Any]:
