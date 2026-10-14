@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,10 @@ from .drive import GoogleDriveClient
 
 
 METADATA_NAME = "latest.json"
+
+
+class TransientSourceError(CloudArchiveError):
+    """A supplier or network failure exhausted its bounded retries."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +99,8 @@ class StockDriveSyncService:
                     target.append(str(result["batch_id"]))
                     encrypted.unlink(missing_ok=True)
                     archive.unlink(missing_ok=True)
-        return {"applied": applied, "already_applied": skipped}
+            cleaned = self._acknowledge_and_cleanup(drive, metadata)
+        return {"applied": applied, "already_applied": skipped, "cleaned": cleaned}
 
     def cloud_run(self, target_date: date, *, stage: str = "menu2") -> dict[str, Any]:
         if stage not in {"menu2", "menu5", "menu7", "remaining", "all"}:
@@ -118,9 +124,10 @@ class StockDriveSyncService:
             commit = self._git_commit()
             checkpoints: list[dict[str, Any]] = []
             actual = before
-            completed_stage = str(metadata.get("completed_stage") or "")
+            previous_stage = self._completed_stage_for(metadata, before)
+            completed_stage = self._completed_stage_for(metadata, target_date)
             self._require_previous_date_completed(
-                before, target_date, completed_stage, stage
+                before, target_date, previous_stage, stage
             )
 
             if stage in {"menu2", "all"}:
@@ -139,18 +146,21 @@ class StockDriveSyncService:
                     return {
                         "status": "updated" if checkpoints else "already-complete",
                         "reference_date": target_date.isoformat(),
-                        "completed_stage": "menu2",
+                        "completed_stage": self._completed_stage_for(
+                            metadata, target_date
+                        ),
                         "checkpoints": checkpoints,
                     }
 
-            self._require_reference_date(actual, target_date, stage)
+            self._require_stage_base(actual, target_date, stage)
             day = target_date.isoformat()
 
             if stage in {"menu5", "remaining", "all"} and not self._stage_completed(
                 completed_stage, "menu5"
             ):
                 metadata, menu5_checkpoints = self._run_menu5_checkpointed(
-                    drive, metadata, work, conninfo, target_date, commit
+                    drive, metadata, work, conninfo, target_date, commit,
+                    state_reference_date=actual,
                 )
                 checkpoints.extend(menu5_checkpoints)
                 completed_stage = "menu5"
@@ -176,7 +186,8 @@ class StockDriveSyncService:
             ):
                 self._run_menu7_with_retry(day)
                 metadata, checkpoint = self._publish_checkpoint(
-                    drive, metadata, work, conninfo, target_date, commit, "menu7"
+                    drive, metadata, work, conninfo, target_date, commit, "menu7",
+                    state_reference_date=actual,
                 )
                 checkpoints.append(checkpoint)
 
@@ -231,7 +242,10 @@ class StockDriveSyncService:
             "scripts/run_xing_db_menu.py", *arguments, accepted=(0, 3)
         )
         if result == 3:
-            self._run("scripts/run_xing_db_menu.py", *arguments)
+            try:
+                self._run("scripts/run_xing_db_menu.py", *arguments)
+            except CloudArchiveError as exc:
+                raise TransientSourceError("메뉴 7 공급원 호출이 2회 실패했습니다.") from exc
 
     def _run_menu2_with_retry(self, day: str) -> int:
         arguments = (
@@ -244,7 +258,7 @@ class StockDriveSyncService:
             )
             if result != 3:
                 return result
-        return self._run("scripts/run_daily_pipeline.py", *arguments, accepted=(0, 2))
+        return 3
 
     def _run_menu5_checkpointed(
         self,
@@ -254,6 +268,8 @@ class StockDriveSyncService:
         conninfo: str,
         target_date: date,
         commit: str,
+        *,
+        state_reference_date: date | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Run menu 5 in resumable batches and persist every valid batch."""
         day = target_date.isoformat()
@@ -262,34 +278,43 @@ class StockDriveSyncService:
         checkpoints: list[dict[str, Any]] = []
 
         while True:
-            result = self._run(
-                "scripts/update_ls_investor_date_range.py",
-                "--start", day,
-                "--end", day,
-                "--chunk-days", "1",
-                "--max-tickers", str(batch_size),
-                "--ticker-offset", str(offset),
-                "--empty-is-complete",
-                accepted=(0, 3, 4),
-            )
+            for attempt in range(2):
+                result = self._run(
+                    "scripts/update_ls_investor_date_range.py",
+                    "--start", day,
+                    "--end", day,
+                    "--chunk-days", "1",
+                    "--max-tickers", str(batch_size),
+                    "--ticker-offset", str(offset),
+                    "--empty-is-complete",
+                    accepted=(0, 3, 4),
+                )
+                if result != 3:
+                    break
+                metadata, checkpoint = self._publish_recovery_checkpoint(
+                    drive, metadata, work, conninfo, target_date, commit,
+                    next_offset=offset,
+                )
+                checkpoints.append(checkpoint)
+                if attempt:
+                    raise TransientSourceError(
+                        f"메뉴 5 공급원 호출이 2회 실패했습니다: 재개 위치={offset}"
+                    )
             if result == 4:
                 break
 
-            next_offset = offset + batch_size if result == 0 else offset
+            next_offset = offset + batch_size
             metadata, checkpoint = self._publish_recovery_checkpoint(
                 drive, metadata, work, conninfo, target_date, commit,
                 next_offset=next_offset,
             )
             checkpoints.append(checkpoint)
-            if result == 3:
-                raise CloudArchiveError(
-                    f"메뉴 5 묶음 실패: 정상 자료 저장 완료, 다음 재개 위치={offset}"
-                )
             offset = next_offset
 
         metadata.pop("menu5_next_offset", None)
         metadata, checkpoint = self._publish_checkpoint(
-            drive, metadata, work, conninfo, target_date, commit, "menu5"
+            drive, metadata, work, conninfo, target_date, commit, "menu5",
+            state_reference_date=state_reference_date,
         )
         checkpoints.append(checkpoint)
         return metadata, checkpoints
@@ -335,12 +360,13 @@ class StockDriveSyncService:
         delta_record["completed_stage"] = "menu5-partial"
         delta_record["menu5_next_offset"] = next_offset
         deltas.append(delta_record)
+        stage = self._record_stage(metadata, reference_date, "menu5-partial")
         metadata.update(
             {
                 "deltas": sorted(
                     deltas, key=lambda item: item["reference_date"]
                 )[-400:],
-                "completed_stage": "menu5-partial",
+                "completed_stage": stage,
                 "state_checkpoint_pending": "menu5-partial",
                 "menu5_next_offset": next_offset,
             }
@@ -362,6 +388,8 @@ class StockDriveSyncService:
         reference_date: date,
         commit: str,
         stage: str,
+        *,
+        state_reference_date: date | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Persist one completed menu before the next expensive menu starts."""
         day = reference_date.isoformat()
@@ -393,13 +421,14 @@ class StockDriveSyncService:
         )
         delta_record["completed_stage"] = stage
         deltas.append(delta_record)
+        completed_stage = self._record_stage(metadata, reference_date, stage)
         metadata.update(
             {
                 "deltas": sorted(
                     deltas, key=lambda item: item["reference_date"]
                 )[-400:],
-                "completed_stage": stage,
-                "state_checkpoint_pending": stage,
+                "completed_stage": completed_stage,
+                "state_checkpoint_pending": completed_stage,
             }
         )
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
@@ -408,7 +437,7 @@ class StockDriveSyncService:
             state = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
                 checkpoint_dir / "next-state.tar.gz",
                 pg_dump=self._executable("pg_dump"),
-                reference_date=reference_date,
+                reference_date=state_reference_date or reference_date,
                 git_commit=commit,
             )
         next_slot = "b" if metadata.get("state_slot") == "a" else "a"
@@ -481,6 +510,11 @@ class StockDriveSyncService:
                     "status": "no-new-trading-day",
                     "requested_date": target_date.isoformat(),
                 }
+            if exit_code == 3:
+                return {
+                    "status": "provider-failed",
+                    "requested_date": target_date.isoformat(),
+                }
             raise CloudArchiveError("메뉴 2 후 요청 거래일이 확인되지 않았습니다.")
         raise CloudArchiveError(
             f"요청일과 DB 최신 거래일이 다릅니다: 요청={target_date}, DB={actual}"
@@ -496,10 +530,81 @@ class StockDriveSyncService:
                 f"요청={target_date}, DB={actual}"
             )
 
+    @classmethod
+    def _require_stage_base(
+        cls, actual: date | None, target_date: date, stage: str
+    ) -> None:
+        """Permit explicitly selected later stages without falsifying price state."""
+        if stage in {"menu5", "menu7"} and actual is not None and actual <= target_date:
+            return
+        cls._require_reference_date(actual, target_date, stage)
+
+    @classmethod
+    def _completed_stage_for(
+        cls, metadata: dict[str, Any], reference_date: date | None
+    ) -> str:
+        if reference_date is None:
+            return ""
+        day = reference_date.isoformat()
+        stage = str((metadata.get("stage_dates") or {}).get(day) or "")
+        if stage:
+            return stage
+        state = metadata.get("state") or {}
+        return (
+            str(metadata.get("completed_stage") or "")
+            if state.get("reference_date") == day
+            else ""
+        )
+
+    @classmethod
+    def _record_stage(
+        cls, metadata: dict[str, Any], reference_date: date, stage: str
+    ) -> str:
+        stages = dict(metadata.get("stage_dates") or {})
+        state = metadata.get("state") or {}
+        state_day = state.get("reference_date")
+        if state_day and state_day not in stages:
+            stages[state_day] = str(metadata.get("completed_stage") or "")
+        day = reference_date.isoformat()
+        current = str(stages.get(day) or "")
+        stages[day] = stage if not cls._stage_completed(current, stage) else current
+        metadata["stage_dates"] = stages
+        return stages[day]
+
     @staticmethod
     def _stage_completed(completed_stage: str, requested_stage: str) -> bool:
-        order = {"": 0, "menu2": 1, "menu5": 2, "menu7": 3}
+        order = {"": 0, "menu2": 1, "menu5-partial": 2, "menu5": 3, "menu7": 4}
         return order.get(completed_stage, 0) >= order[requested_stage]
+
+    @staticmethod
+    def _retention_cutoff(today: date | None = None) -> date:
+        return (today or date.today()) - timedelta(days=30)
+
+    def _acknowledge_and_cleanup(
+        self, drive: GoogleDriveClient, metadata: dict[str, Any]
+    ) -> list[str]:
+        """Acknowledge local application and delete only deltas older than 30 days."""
+        deltas = list(metadata.get("deltas", []))
+        if not deltas:
+            return []
+        synced_through = max(str(item["reference_date"]) for item in deltas)
+        cutoff = self._retention_cutoff().isoformat()
+        expired = [
+            item for item in deltas
+            if str(item["reference_date"]) < cutoff
+            and str(item["reference_date"]) <= synced_through
+        ]
+        expired_ids = {str(item["id"]) for item in expired}
+        for item in drive.list_folder(str(metadata["delta_folder_id"])):
+            match = re.match(r"delta-(\d{4}-\d{2}-\d{2})-", str(item.get("name", "")))
+            if match and match.group(1) < cutoff and match.group(1) <= synced_through:
+                expired_ids.add(str(item["id"]))
+        for file_id in expired_ids:
+            drive.delete(file_id)
+        metadata["local_synced_through"] = synced_through
+        metadata["deltas"] = [item for item in deltas if item not in expired]
+        drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+        return [str(item["reference_date"]) for item in expired]
 
     @staticmethod
     def _require_previous_date_completed(

@@ -6,19 +6,80 @@ on:
     types: [completed]
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
   signal:
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
+    outputs:
+      issue: ${{ steps.issue.outputs.number }}
     steps:
       - name: Create failure issue
+        id: issue
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
-        run: >-
-          gh issue create --repo "$GITHUB_REPOSITORY"
-          --title "Stock Drive 실패: run $RUN_ID"
-          --body "Stock Drive 자동 실행이 실패했습니다. 실행 로그: $RUN_URL"
+        run: |
+          url=$(gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Stock Drive 코드 오류: run $RUN_ID" \
+            --body "공급원 오류와 분리된 실제 실행 오류입니다. Codex 진단을 시작합니다. 실행 로그: $RUN_URL")
+          number=${url##*/}
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+  codex-diagnose:
+    needs: signal
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+    outputs:
+      diagnosis: ${{ steps.codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download failed run logs
+        if: env.HAS_OPENAI_API_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/logs" > failed-run.zip
+          mkdir failed-run-logs
+          unzip -q failed-run.zip -d failed-run-logs
+      - name: Run Codex only for actual workflow errors
+        id: codex
+        if: env.HAS_OPENAI_API_KEY == 'true'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/stock-drive-failure.md
+          sandbox: workspace-write
+
+  report:
+    needs: [signal, codex-diagnose]
+    if: ${{ always() && needs.signal.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Add Codex result to issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.signal.outputs.issue }}
+          DIAGNOSIS: ${{ needs.codex-diagnose.outputs.diagnosis }}
+        run: |
+          if [[ -n "$DIAGNOSIS" ]]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$DIAGNOSIS"
+          else
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+              --body "Codex Action을 실행하려면 저장소 Secret OPENAI_API_KEY가 필요합니다."
+          fi

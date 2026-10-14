@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   update:
@@ -56,9 +57,29 @@ jobs:
         run: python -m pip install --disable-pip-version-check -r requirements-cloud-worker.txt
       - name: Run and persist one database stage
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           args=(--stage "${{ inputs.stage }}")
           if [[ -n "${{ inputs.target_date }}" ]]; then
             args+=(--date "${{ inputs.target_date }}")
           fi
-          python scripts/stock_drive_sync.py cloud-run "${args[@]}"
+          set +e
+          output=$(python scripts/stock_drive_sync.py cloud-run "${args[@]}" 2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$output"
+          if [[ $code -eq 75 ]]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Stock Drive 공급원·네트워크 오류: ${{ inputs.target_date || 'KST today' }}" \
+              --body "정해진 2회 재시도 후에도 일시 오류가 계속되었습니다. 완료 데이터와 체크포인트는 보존했습니다. 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            exit 0
+          fi
+          if [[ $code -ne 0 ]]; then
+            exit "$code"
+          fi
+          if grep -q '"status": "provider-failed"' <<<"$output"; then
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Stock Drive 공급원 오류: ${{ inputs.target_date || 'KST today' }}" \
+              --body "가격 공급원 호출이 정해진 2회 모두 실패했습니다. 완료 데이터와 체크포인트는 보존했고 메뉴 5·7은 계속 실행합니다. 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi

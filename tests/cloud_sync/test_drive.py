@@ -33,6 +33,22 @@ class GoogleDriveClientTests(unittest.TestCase):
         self.assertEqual(2, session.post.call_count)
         session.headers.update.assert_any_call({"Authorization": "Bearer refreshed"})
 
+    def test_delete_requires_successful_drive_response(self) -> None:
+        session = MagicMock()
+        token = MagicMock(ok=True, status_code=200)
+        token.json.return_value = {"access_token": "token"}
+        session.post.return_value = token
+        deleted = MagicMock(ok=True, status_code=204)
+        session.delete.return_value = deleted
+        client = GoogleDriveClient(
+            client_id="id", client_secret="secret", refresh_token="refresh",
+            root_folder_id="folder", session=session,
+        )
+
+        client.delete("file-id")
+
+        session.delete.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

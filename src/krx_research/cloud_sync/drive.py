@@ -16,6 +16,10 @@ class GoogleDriveError(RuntimeError):
     pass
 
 
+class GoogleDriveTransientError(GoogleDriveError):
+    pass
+
+
 class GoogleDriveClient:
     """Minimal drive.file client for files created by the stock automation."""
 
@@ -159,6 +163,12 @@ class GoogleDriveClient:
         temporary.replace(target)
         return target
 
+    def delete(self, file_id: str) -> None:
+        response = self._request(
+            "delete", f"{DRIVE_API}/files/{file_id}", timeout=30
+        )
+        self._require_success(response, "Drive 파일 삭제")
+
     def read_json(self, name: str, parent_id: str) -> dict[str, Any] | None:
         found = self.find(name, parent_id)
         if not found:
@@ -198,12 +208,25 @@ class GoogleDriveClient:
         self._session.headers.update({"Authorization": f"Bearer {token}"})
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
-        """Retry one Drive request after refreshing an expired access token."""
-        response = getattr(self._session, method)(url, **kwargs)
-        if response.status_code == 401:
-            self._authenticate()
-            response = getattr(self._session, method)(url, **kwargs)
-        return response
+        """Retry exactly once for expired tokens and transient network failures."""
+        for attempt in range(2):
+            try:
+                response = getattr(self._session, method)(url, **kwargs)
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                if attempt:
+                    raise GoogleDriveTransientError("Drive 네트워크 요청이 2회 실패했습니다.") from exc
+                continue
+            if response.status_code == 401 and not attempt:
+                self._authenticate()
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt:
+                    raise GoogleDriveTransientError(
+                        f"Drive 일시 오류가 2회 발생했습니다: HTTP {response.status_code}"
+                    )
+                continue
+            return response
+        raise GoogleDriveTransientError("Drive 네트워크 요청이 2회 실패했습니다.")
 
     @classmethod
     def _json(cls, response: requests.Response, operation: str) -> dict[str, Any]:

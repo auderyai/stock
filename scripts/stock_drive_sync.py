@@ -12,7 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from krx_research.cloud_sync.credentials import DriveCredentials
-from krx_research.cloud_sync.service import StockDriveSyncService, SyncContext
+from krx_research.cloud_sync.drive import GoogleDriveTransientError
+from krx_research.cloud_sync.service import (
+    StockDriveSyncService,
+    SyncContext,
+    TransientSourceError,
+)
 
 
 def _date(value: str) -> date:
@@ -68,6 +73,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         print(f"감사 로그: {log_path}")
         return 0
+    except (TransientSourceError, GoogleDriveTransientError) as exc:
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write(
+                f"{datetime.now().astimezone().isoformat(timespec='seconds')} "
+                f"TRANSIENT command={args.command} error={type(exc).__name__}\n"
+            )
+        print(f"[TRANSIENT] {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 75
     except Exception as exc:
         with log_path.open("a", encoding="utf-8") as log:
             log.write(

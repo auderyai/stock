@@ -12,6 +12,7 @@ from krx_research.cloud_sync.service import (
     CloudArchiveError,
     StockDriveSyncService,
     SyncContext,
+    TransientSourceError,
 )
 
 
@@ -50,14 +51,13 @@ class CloudSyncServiceTests(unittest.TestCase):
         credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
         service = StockDriveSyncService(SyncContext(root, credentials))
 
-        with patch.object(service, "_run", side_effect=[3, 3, 0]) as run:
+        with patch.object(service, "_run", side_effect=[3, 3]) as run:
             result = service._run_menu2_with_retry("2026-10-12")
 
-        self.assertEqual(0, result)
-        self.assertEqual(3, run.call_count)
+        self.assertEqual(3, result)
+        self.assertEqual(2, run.call_count)
         self.assertEqual((0, 2, 3), run.call_args_list[0].kwargs["accepted"])
         self.assertEqual((0, 2, 3), run.call_args_list[1].kwargs["accepted"])
-        self.assertEqual((0, 2), run.call_args_list[2].kwargs["accepted"])
 
     def test_cloud_menu2_returns_confirmed_holiday_without_retry(self) -> None:
         root = Path.cwd()
@@ -89,6 +89,16 @@ class CloudSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(
             {"status": "no-new-trading-day", "requested_date": "2026-10-09"},
+            result,
+        )
+
+    def test_provider_failure_is_reported_without_discarding_checkpoints(self) -> None:
+        before = date(2026, 10, 12)
+        result = StockDriveSyncService._validate_menu2_date(
+            before, before, date(2026, 10, 13), 3
+        )
+        self.assertEqual(
+            {"status": "provider-failed", "requested_date": "2026-10-13"},
             result,
         )
 
@@ -191,16 +201,17 @@ class CloudSyncServiceTests(unittest.TestCase):
         service = StockDriveSyncService(SyncContext(root, credentials))
         metadata = {"delta_folder_id": "deltas", "menu5_next_offset": 300}
 
-        with patch.object(service, "_run", return_value=3), patch.object(
+        with patch.object(service, "_run", side_effect=[3, 3]), patch.object(
             service, "_publish_recovery_checkpoint",
             return_value=(metadata, {"stage": "menu5-partial"}),
         ) as partial:
-            with self.assertRaisesRegex(CloudArchiveError, "다음 재개 위치=300"):
+            with self.assertRaisesRegex(TransientSourceError, "재개 위치=300"):
                 service._run_menu5_checkpointed(
                     object(), metadata, root, "db", date(2026, 10, 12), "abcdef123456"
                 )
 
         self.assertEqual(300, partial.call_args.kwargs["next_offset"])
+        self.assertEqual(2, partial.call_count)
 
     def test_next_date_waits_until_previous_menu7_checkpoint(self) -> None:
         with self.assertRaisesRegex(CloudArchiveError, "이전 기준일 작업이 완료되지 않아"):
@@ -212,6 +223,32 @@ class CloudSyncServiceTests(unittest.TestCase):
         StockDriveSyncService._require_previous_date_completed(
             date(2026, 10, 12), date(2026, 10, 13), "menu7", "menu2"
         )
+
+    def test_cleanup_deletes_only_locally_applied_deltas_older_than_30_days(self) -> None:
+        root = Path.cwd()
+        service = StockDriveSyncService(SyncContext(
+            root, DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        drive = MagicMock(root_folder_id="folder")
+        metadata = {
+            "delta_folder_id": "deltas",
+            "deltas": [
+                {"id": "old", "reference_date": "2026-09-01"},
+                {"id": "kept", "reference_date": "2026-10-01"},
+            ]
+        }
+        drive.list_folder.return_value = [
+            {"id": "orphan", "name": "delta-2026-09-02-menu5-old.enc"},
+            {"id": "recent", "name": "delta-2026-10-01-menu7-new.enc"},
+        ]
+
+        with patch.object(service, "_retention_cutoff", return_value=date(2026, 9, 15)):
+            cleaned = service._acknowledge_and_cleanup(drive, metadata)
+
+        self.assertEqual(["2026-09-01"], cleaned)
+        self.assertEqual({"old", "orphan"}, {call.args[0] for call in drive.delete.call_args_list})
+        self.assertEqual("2026-10-01", metadata["local_synced_through"])
+        self.assertEqual(["kept"], [item["id"] for item in metadata["deltas"]])
 
 
 if __name__ == "__main__":

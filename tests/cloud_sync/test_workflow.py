@@ -37,6 +37,16 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn("issues: write", workflow)
         self.assertIn("gh issue create", workflow)
         self.assertIn("github.event.workflow_run.html_url", workflow)
+        self.assertIn("openai/codex-action@v1", workflow)
+        self.assertIn("secrets.OPENAI_API_KEY", workflow)
+
+    def test_provider_failure_notifies_and_allows_later_stages(self) -> None:
+        workflow = (ROOT / ".github/workflows/stock-drive-stage.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"status": "provider-failed"', workflow)
+        self.assertIn("정해진 2회 모두 실패", workflow)
+        self.assertIn("issues: write", workflow)
 
     def test_manual_run_continues_from_selected_checkpoint(self) -> None:
         workflow = (ROOT / ".github/workflows/stock-daily-google-drive.yml").read_text(
