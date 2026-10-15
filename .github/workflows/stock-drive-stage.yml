@@ -64,16 +64,18 @@ jobs:
           if [[ -n "${{ inputs.target_date }}" ]]; then
             args+=(--date "${{ inputs.target_date }}")
           fi
+          output_file=$(mktemp)
           set +e
-          output=$(python scripts/stock_drive_sync.py cloud-run "${args[@]}" 2>&1)
-          code=$?
+          python scripts/stock_drive_sync.py cloud-run "${args[@]}" 2>&1 | tee "$output_file"
+          code=${PIPESTATUS[0]}
           set -e
-          printf '%s\n' "$output"
+          output=$(<"$output_file")
+          rm -f "$output_file"
           if [[ $code -eq 75 ]]; then
             gh issue create --repo "$GITHUB_REPOSITORY" \
               --title "Stock Drive 공급원·네트워크 오류: ${{ inputs.target_date || 'KST today' }}" \
               --body "정해진 2회 재시도 후에도 일시 오류가 계속되었습니다. 완료 데이터와 체크포인트는 보존했습니다. 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            exit 0
+            exit "$code"
           fi
           if [[ $code -ne 0 ]]; then
             exit "$code"
