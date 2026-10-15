@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class StockDriveWorkflowTests(unittest.TestCase):
-    def test_scheduled_run_executes_all_checkpointed_stages(self) -> None:
+    def test_scheduled_run_executes_only_cloud_stages(self) -> None:
         workflow = (ROOT / ".github/workflows/stock-daily-google-drive.yml").read_text(
             encoding="utf-8"
         )
@@ -16,12 +16,11 @@ class StockDriveWorkflowTests(unittest.TestCase):
 
         self.assertIn('cron: "37 11 * * 1-5"', workflow)
         self.assertNotIn('timezone:', workflow)
-        self.assertIn("scheduled-menu2:", workflow)
+        self.assertNotIn("scheduled-menu2:", workflow)
         self.assertIn("scheduled-menu5:", workflow)
-        self.assertIn("needs: scheduled-menu2", workflow)
         self.assertIn("scheduled-menu7:", workflow)
         self.assertIn("needs: scheduled-menu5", workflow)
-        self.assertIn("stage: menu2", workflow)
+        self.assertNotIn("stage: menu2", workflow)
         self.assertIn("stage: menu5", workflow)
         self.assertIn("stage: menu7", workflow)
         self.assertIn("workflow_call:", stage_workflow)
@@ -53,11 +52,10 @@ class StockDriveWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("manual-menu2:", workflow)
+        self.assertNotIn("manual-menu2:", workflow)
         self.assertIn("manual-menu5:", workflow)
-        self.assertIn("needs: manual-menu2", workflow)
         self.assertIn("manual-menu7:", workflow)
-        self.assertIn("needs: [manual-menu2, manual-menu5]", workflow)
+        self.assertIn("needs: manual-menu5", workflow)
         self.assertIn("needs.manual-menu5.result == 'success'", workflow)
 
 

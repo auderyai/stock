@@ -11,15 +11,13 @@ on:
         required: false
         type: string
       stage:
-        description: "독립 실행 단계"
+        description: "클라우드 실행 시작 단계"
         required: false
-        default: "menu2"
+        default: "menu5"
         type: choice
         options:
-          - menu2
           - menu5
           - menu7
-          - remaining
 
 concurrency:
   group: stock-daily-google-drive
@@ -30,20 +28,8 @@ permissions:
   issues: write
 
 jobs:
-  manual-menu2:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'menu2'
-    uses: ./.github/workflows/stock-drive-stage.yml
-    with:
-      target_date: ${{ inputs.target_date }}
-      stage: menu2
-    secrets: inherit
-
   manual-menu5:
-    needs: manual-menu2
-    if: >-
-      always() && github.event_name == 'workflow_dispatch' &&
-      (inputs.stage == 'menu5' ||
-      (inputs.stage == 'menu2' && needs.manual-menu2.result == 'success'))
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'menu5'
     uses: ./.github/workflows/stock-drive-stage.yml
     with:
       target_date: ${{ inputs.target_date }}
@@ -51,34 +37,18 @@ jobs:
     secrets: inherit
 
   manual-menu7:
-    needs: [manual-menu2, manual-menu5]
+    needs: manual-menu5
     if: >-
       always() && github.event_name == 'workflow_dispatch' &&
       (inputs.stage == 'menu7' ||
-      (inputs.stage != 'menu7' && needs.manual-menu5.result == 'success'))
+      needs.manual-menu5.result == 'success')
     uses: ./.github/workflows/stock-drive-stage.yml
     with:
       target_date: ${{ inputs.target_date }}
       stage: menu7
     secrets: inherit
 
-  manual-remaining:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'remaining'
-    uses: ./.github/workflows/stock-drive-stage.yml
-    with:
-      target_date: ${{ inputs.target_date }}
-      stage: remaining
-    secrets: inherit
-
-  scheduled-menu2:
-    if: github.event_name == 'schedule'
-    uses: ./.github/workflows/stock-drive-stage.yml
-    with:
-      stage: menu2
-    secrets: inherit
-
   scheduled-menu5:
-    needs: scheduled-menu2
     if: github.event_name == 'schedule'
     uses: ./.github/workflows/stock-drive-stage.yml
     with:
