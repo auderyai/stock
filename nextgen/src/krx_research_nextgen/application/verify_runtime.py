@@ -50,7 +50,7 @@ def main() -> int:
         if max(left_edges) - min(left_edges) > 0.5:
             raise RuntimeError(f"Chart panels are not horizontally aligned: {left_edges}")
         chart_window = container.window._chart_window
-        if len(chart_window._bundle.assessments) != 3 or "제시 리버모어" not in chart_window.strategy_text.text():
+        if len(chart_window._bundle.assessments) != 3 or "제시 리버모어" not in chart_window.strategy_text.toPlainText():
             raise RuntimeError("Classic-strategy assessments were not rendered")
         chart_window.strategy_mode.setCurrentText("제시 리버모어"); app.processEvents()
         if "제시 리버모어" not in chart_window.chart.strategy_overlay.text():

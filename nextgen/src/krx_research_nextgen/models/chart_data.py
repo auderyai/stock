@@ -19,7 +19,10 @@ class StrategyAssessment:
     levels: tuple[tuple[str, float, str], ...] = ()
 
     def text(self) -> str:
-        return f"[{self.strategy}]\n현재 판단: {self.state}\n쉬운 설명: {self.detail}"
+        return f"[{self.strategy}]\n현재 판단: {self.state}\n{self.detail}"
+
+    def overlay_text(self) -> str:
+        return f"{self.strategy}: {self.state}"
 
 
 @dataclass(frozen=True)

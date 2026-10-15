@@ -64,25 +64,45 @@ class ClassicStrategyService:
             points, direction = swings[end - 6:end], self._impulse(swings[end - 6:end])
             if direction:
                 labels = tuple((date, price, str(index)) for index, (date, price, _) in enumerate(points))
-                detail = (f"최근 고점과 저점의 움직임이 {direction} 방향의 5단계 파동 모양과 비슷합니다. "
-                          "다만 조건에 맞는 모양을 찾았다는 뜻일 뿐, 다음 가격 방향을 예측하거나 확정한 것은 아닙니다.")
+                turns = " → ".join(f"{date:%Y-%m-%d} {price:,.0f}원" for date, price, _ in points)
+                detail = (f"확인 구간: {points[0][0]:%Y-%m-%d} ~ {points[-1][0]:%Y-%m-%d}\n"
+                          f"확인된 전환점 6개: {turns}\n"
+                          "조건 점검: ① 2파가 1파 시작점을 넘지 않음: 통과  ② 3파가 가장 짧지 않음: 통과  "
+                          "③ 4파가 1파 가격 구간과 겹치지 않음: 통과\n"
+                          f"해석: 최근 고점과 저점이 {direction} 방향의 5단계 파동 모양과 비슷합니다.\n"
+                          "주의: 세 규칙을 만족한 과거 모양이라는 뜻이며 다음 가격 방향, 파동 종료 또는 반전을 예측한 결과가 아닙니다.")
                 return self._item(name, f"{direction} 5단계 파동 모양 발견", detail, labels)
-        return self._item(name, "5단계 파동 모양 없음", "최근 가격 흐름에서는 5단계 파동의 필수 조건이 모두 맞는 구간을 찾지 못했습니다.")
+        return self._item(name, "5단계 파동 모양 없음",
+                          "검사 내용: 최근 확정된 고점과 저점을 6개씩 묶어 세 가지 필수 규칙을 확인했습니다.\n"
+                          "결과: 세 규칙을 동시에 만족하는 상승 또는 하락 5단계 구간을 찾지 못했습니다.\n"
+                          "주의: 파동이 절대 없다는 뜻이 아니라, 현재 저장된 일봉과 전환점 기준으로 확인되지 않았다는 뜻입니다.")
 
     def _livermore(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "제시 리버모어"
         if len(daily) < 253: return self._item(name, "자료부족", "당일을 제외한 252거래일 피벗과 직전 20일 거래량 판정에는 최소 253거래일이 필요합니다.")
         last, prior = daily.iloc[-1], daily.iloc[-253:-1]
         pivot, average = float(prior.high.max()), float(prior.volume.tail(20).mean())
+        pivot_date = prior.high.idxmax()
         ratio = float(last.volume) / average if average > 0 else np.nan
         breakout, heavy = float(last.close) > pivot, np.isfinite(ratio) and ratio >= 1.5
         state = ("최고가 돌파·거래량 증가" if breakout and heavy else "최고가 돌파·거래량 부족" if breakout else
                  "최고가에 가까움·돌파 대기" if float(last.close) >= pivot * .97 else "최고가 돌파 전")
-        price = ("최근 1년 최고가를 넘어섰습니다" if breakout else
-                 f"최근 1년 최고가 {pivot:,.0f}원보다 {(pivot - float(last.close)) / pivot * 100:.1f}% 낮습니다")
-        volume = "넘었습니다" if heavy else "넘지 못했습니다"
-        detail = (f"현재 종가는 {last.close:,.0f}원으로 {price}. 오늘 거래량은 최근 20일 평균의 "
-                  f"{ratio:.2f}배로 증가 기준 1.50배를 {volume}. 가격과 거래량이 모두 기준을 만족해야 돌파 신호로 봅니다.")
+        gap = float(last.close) - pivot
+        price_result = "통과" if breakout else "미통과"
+        volume_result = "통과" if heavy else "미통과"
+        conclusion = ("가격과 거래량 조건을 모두 만족했습니다." if breakout and heavy else
+                      "가격은 돌파했지만 거래량 증가 조건이 부족합니다." if breakout else
+                      "거래량은 증가했지만 가격이 최근 1년 최고가를 돌파하지 못했습니다." if heavy else
+                      "가격과 거래량 조건을 모두 만족하지 못했습니다.")
+        detail = (f"계산 기준일: {daily.index[-1]:%Y-%m-%d}\n"
+                  f"① 가격 조건: 종가 {last.close:,.0f}원 > 직전 252거래일 최고가 {pivot:,.0f}원"
+                  f"({pivot_date:%Y-%m-%d}) → {price_result}\n"
+                  f"   차이: {abs(gap):,.0f}원, 최고가 대비 {abs(gap) / pivot * 100:.1f}% "
+                  f"{'높음' if gap > 0 else '낮음'}\n"
+                  f"② 거래량 조건: 오늘 {last.volume:,.0f}주 ÷ 직전 20일 평균 {average:,.0f}주 = "
+                  f"{ratio:.2f}배, 필요 기준 1.50배 이상 → {volume_result}\n"
+                  f"최종 해석: {conclusion}\n"
+                  "참고: 시장 전체와 업종의 강도는 이 판정에 포함하지 않습니다.")
         return self._item(name, state, detail, levels=(("price", pivot, "최근 1년 최고가"), ("volume", average, "직전 20일 평균 거래량")))
 
     def _elder(self, daily: pd.DataFrame) -> StrategyAssessment:
@@ -94,16 +114,28 @@ class ClassicStrategyService:
         histogram = (macd - macd.ewm(span=9, adjust=False, min_periods=9).mean()).dropna()
         stochastic = daily[["slow_k", "slow_d"]].dropna()
         if len(histogram) < 2 or len(stochastic) < 1: return self._item(name, "자료부족", "완성된 주봉 MACD-Histogram과 일봉 Slow Stochastic 자료가 부족합니다.")
-        rising, k = float(histogram.iloc[-1]) > float(histogram.iloc[-2]), float(stochastic.iloc[-1].slow_k)
+        prior_hist, current_hist = float(histogram.iloc[-2]), float(histogram.iloc[-1])
+        rising, k = current_hist > prior_hist, float(stochastic.iloc[-1].slow_k)
         last, previous = daily.iloc[-1], daily.iloc[-2]
         long_setup, short_setup = rising and k < 30, not rising and k > 70
-        long_entry, short_entry = long_setup and last.high > previous.high, short_setup and last.low < previous.low
+        price_cross = last.high > previous.high if rising else last.low < previous.low
+        long_entry, short_entry = long_setup and price_cross, short_setup and price_cross
         state = ("매수 조건 충족" if long_entry else "매수 관심·가격 돌파 대기" if long_setup else "매도 조건 충족" if short_entry else
                  "매도 관심·가격 하락 대기" if short_setup else "주봉 상승·매수 조건 대기" if rising else "주봉 하락·매도 조건 대기")
         entry, label = (float(previous.high), "직전일 고가") if rising else (float(previous.low), "직전일 저가")
-        zone = "낮은 구간" if k < 30 else "높은 구간" if k > 70 else "중간 구간"
-        action = "넘어야 매수 조건이 확인됩니다" if rising else "아래로 내려가야 매도 조건이 확인됩니다"
-        detail = (f"주봉의 가격 힘은 {'강해지는 중' if rising else '약해지는 중'}이고, 일봉 과열·침체 지표는 "
-                  f"{k:.1f}로 {zone}입니다. 가격이 {label} {entry:,.0f}원을 {action}.")
+        setup = long_setup if rising else short_setup
+        trigger = long_entry if rising else short_entry
+        daily_value = float(last.high if rising else last.low)
+        oscillator_rule = "30 미만" if rising else "70 초과"
+        price_rule = ">" if rising else "<"
+        detail = (f"계산 기준일: {daily.index[-1]:%Y-%m-%d}\n"
+                  f"① 주봉 방향: MACD 힘 지표가 {prior_hist:,.2f}에서 {current_hist:,.2f}로 "
+                  f"{'상승' if rising else '하락'} → {'매수' if rising else '매도'} 방향 확인\n"
+                  f"② 일봉 시점: 과열·침체 지표 {k:.1f}, 필요 기준 {oscillator_rule} → "
+                  f"{'통과' if setup else '미통과'}\n"
+                  f"③ 가격 확인: 오늘 {'고가' if rising else '저가'} {daily_value:,.0f}원 {price_rule} "
+                  f"{label} {entry:,.0f}원 → {'통과' if price_cross else '미통과'}\n"
+                  f"최종 해석: {'세 조건이 모두 맞아 진입 조건이 확인되었습니다.' if trigger else '아직 세 조건이 모두 맞지 않아 진입 신호가 아닙니다.'}\n"
+                  "주의: 세 조건의 순서를 확인하는 규칙이며 수익을 보장하거나 자동 매매를 지시하지 않습니다.")
         levels = (("price", entry, f"엘더 {label}"), ("stochastic", 30.0, "매수 관심 30"), ("stochastic", 70.0, "매도 관심 70"))
         return self._item(name, state, detail, levels=levels)

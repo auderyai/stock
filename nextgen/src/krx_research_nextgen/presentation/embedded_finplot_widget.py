@@ -151,7 +151,7 @@ class EmbeddedFinplotWidget(QWidget):
             except Exception: pass
         self._strategy_items.clear()
         if assessment is None: self.set_strategy_text(""); fplt.refresh(); return
-        self.set_strategy_text(assessment.text())
+        self.set_strategy_text(assessment.overlay_text())
         color = {"엘리어트 파동": "#6a1b9a", "제시 리버모어": "#2e7d32", "알렉산더 엘더": "#ef6c00"}[assessment.strategy]
         points = [point for point in assessment.points if frame.index.min() <= point[0] <= frame.index.max()]
         if len(points) > 1:
