@@ -259,5 +259,21 @@ _patch_review/
 *.sqlite3
 *.mdb
 
+# Generated datasets and private credential containers must never be tracked
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.parquet
+*.pkl
+*.pickle
+*.pem
+*.key
+*.p12
+*.pfx
+client_secret*.json
+credentials*.json
+token*.json
+
 # Preserve template placeholders
 !templates/**/.gitkeep
