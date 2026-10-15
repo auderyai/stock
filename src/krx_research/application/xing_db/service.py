@@ -185,11 +185,13 @@ class XingDbMenuService:
                   max_tickers: int = 0, ticker_offset: int = 0,
                   chunk_days: int = 90, empty_stop_chunks: int = 0,
                   progress: Progress | None = None, enforce_cutoff: bool = True,
-                  force_refresh: bool = False) -> ActionReport:
+                  force_refresh: bool = False,
+                  independent_target: bool = False) -> ActionReport:
         if start > end:
             raise ValueError("start가 end보다 늦습니다.")
         latest_db_day = self._repo.latest_market_date()
-        effective_end = DailyCloseWritePolicy.resolve_end_date(end, latest_db_day) if enforce_cutoff else end
+        cutoff_base = None if independent_target else latest_db_day
+        effective_end = DailyCloseWritePolicy.resolve_end_date(end, cutoff_base) if enforce_cutoff else end
         if start > effective_end:
             raise ValueError(f"선택 범위에 확정 거래일이 없습니다: {start}~{end} (DB 최신 {latest_db_day})")
         if effective_end != end:
@@ -200,13 +202,24 @@ class XingDbMenuService:
         started = dt.datetime.now()
         total_complete = total_raw = skipped_complete = request_failures = 0
         refresh_failed: set[str] = set()
+        if independent_target:
+            count = self._repo.replace_cloud_stock_universe(
+                self._rows("t8436", {"gubun": "0"})
+            )
+            self._emit(progress, f"클라우드 독립 종목 목록 {count:,}건 갱신")
         if ticker_offset < 0:
             raise ValueError("ticker_offset은 0 이상이어야 합니다.")
-        if ticker_offset:
+        if independent_target:
+            codes = self._repo.list_cloud_stock_codes(ticker, max_tickers, ticker_offset)
+        elif ticker_offset:
             codes = self._repo.list_stock_codes(ticker, max_tickers, ticker_offset)
         else:
             codes = self._repo.list_stock_codes(ticker, max_tickers)
-        trade_days = self._repo.stock_trade_dates_by_code(codes, start, end)
+        trade_days = (
+            {code: self._date_range(start, end) for code in codes}
+            if independent_target else
+            self._repo.stock_trade_dates_by_code(codes, start, end)
+        )
         completed = self._repo.completed_investor_dates_by_code(codes, start, end, "K")
         pending_codes = sum(bool(trade_days.get(code, set()) and
                             (force_refresh or trade_days[code] - completed.get(code, set()))) for code in codes)
@@ -318,11 +331,13 @@ class XingDbMenuService:
     def run_menu7(self, *, start: dt.date, end: dt.date, ticker: str | None = None,
                   venues: tuple[str, ...] = ("NXT", "COMBINED"), max_tickers: int = 0,
                   progress: Progress | None = None, enforce_cutoff: bool = True,
-                  include_investor: bool = True, force_refresh: bool = False) -> ActionReport:
+                  include_investor: bool = True, force_refresh: bool = False,
+                  independent_target: bool = False) -> ActionReport:
         if start > end:
             raise ValueError("start가 end보다 늦습니다.")
         latest_db_day = self._repo.latest_market_date()
-        effective_end = DailyCloseWritePolicy.resolve_end_date(end, latest_db_day) if enforce_cutoff else end
+        cutoff_base = None if independent_target else latest_db_day
+        effective_end = DailyCloseWritePolicy.resolve_end_date(end, cutoff_base) if enforce_cutoff else end
         if start > effective_end:
             raise ValueError(f"선택 범위에 확정 거래일이 없습니다: {start}~{end} (DB 최신 {latest_db_day})")
         if effective_end != end:
@@ -332,9 +347,20 @@ class XingDbMenuService:
         if invalid:
             raise ValueError(f"지원하지 않는 거래시장: {', '.join(invalid)}")
         started = dt.datetime.now()
-        codes = self._repo.list_stock_codes(ticker, max_tickers)
+        if independent_target:
+            count = self._repo.replace_cloud_stock_universe(
+                self._rows("t8436", {"gubun": "0"})
+            )
+            self._emit(progress, f"클라우드 독립 종목 목록 {count:,}건 갱신")
+            codes = self._repo.list_cloud_stock_codes(ticker, max_tickers)
+        else:
+            codes = self._repo.list_stock_codes(ticker, max_tickers)
         venue_names = tuple(v.upper() for v in venues)
-        base_by_code = self._repo.stock_trade_dates_by_code(codes, start, end)
+        base_by_code = (
+            {code: self._date_range(start, end) for code in codes}
+            if independent_target else
+            self._repo.stock_trade_dates_by_code(codes, start, end)
+        )
         stored_before = self._repo.venue_trade_dates_by_code(codes, venue_names, start, end)
         daily_count = skipped = 0
         received: dict[tuple[str, str], set[dt.date]] = {}
@@ -471,6 +497,7 @@ class XingDbMenuService:
                 start=start, end=end, ticker=ticker, max_tickers=max_tickers,
                 chunk_days=min(90, max(1, (end - start).days + 1)), empty_stop_chunks=0, progress=progress,
                 enforce_cutoff=False, force_refresh=force_refresh,
+                independent_target=independent_target,
             )
             investor_stage = next((s for s in investor.stages if s.name == "t1702 원본 저장"), None)
             stages_list.append(
@@ -484,6 +511,10 @@ class XingDbMenuService:
             {"start": start.isoformat(), "end": end.isoformat(), "ticker": ticker or "ALL",
              "venues": ",".join(v.upper() for v in venues)},
         )
+
+    @staticmethod
+    def _date_range(start: dt.date, end: dt.date) -> set[dt.date]:
+        return {start + dt.timedelta(days=offset) for offset in range((end - start).days + 1)}
 
     def _collect_t1702(
         self, stock_code: str, days: list[dt.date]

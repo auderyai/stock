@@ -19,6 +19,7 @@ def main(argv=None):
     p.add_argument("--chunk-days",type=int,default=90)
     p.add_argument("--empty-stop-chunks",type=int,default=0)
     p.add_argument("--force-refresh",action="store_true")
+    p.add_argument("--independent-target",action="store_true")
     p.add_argument("--verification-marker",action="store_true")
     args=p.parse_args(argv)
     bridge=AdaptiveRawTrBridge(ROOT,progress=lambda m:print(m,flush=True))
@@ -27,7 +28,8 @@ def main(argv=None):
             report=svc.run_menu5(start=args.start,end=args.end,ticker=args.ticker,max_tickers=args.max_tickers,
                                  ticker_offset=args.ticker_offset,
                                  chunk_days=args.chunk_days,empty_stop_chunks=args.empty_stop_chunks,
-                                 progress=lambda m:print(m,flush=True),force_refresh=args.force_refresh)
+                                 progress=lambda m:print(m,flush=True),force_refresh=args.force_refresh,
+                                 independent_target=args.independent_target)
     except DataProviderUnavailableError as exc:
         print(f"[FAIL] {exc}",flush=True); return 3
     if args.empty_is_complete and report.metadata.get("code_count") == "0":

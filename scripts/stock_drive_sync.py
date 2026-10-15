@@ -36,21 +36,16 @@ def parser() -> argparse.ArgumentParser:
     )
     cleanup.add_argument("--through", type=_date, required=True)
     cleanup.add_argument("--confirm", choices=("DELETE_SYNCED_DRIVE_DELTAS",))
-    local_base = sub.add_parser(
-        "publish-local-base", help="검증된 로컬 메뉴 2 일일자료를 Drive에 게시"
-    )
-    local_base.add_argument("--date", type=_date, required=True)
-    local_progress = sub.add_parser(
-        "publish-local-progress", help="검증된 로컬 일일 진행자료를 Drive 복구점으로 게시"
-    )
-    local_progress.add_argument("--date", type=_date, required=True)
-    cloud = sub.add_parser("cloud-run", help="GitHub Actions 메뉴 2·5·7 실행")
+    reset = sub.add_parser("reset-menu57-cloud", help="Drive를 메뉴 5·7 전용 상태로 재구성")
+    reset.add_argument("--through", type=_date, required=True)
+    reset.add_argument("--confirm", choices=("DELETE_MENU2_CLOUD_DATA",))
+    cloud = sub.add_parser("cloud-run", help="GitHub Actions 메뉴 5·7 실행")
     cloud.add_argument("--date", type=_date)
     cloud.add_argument(
         "--stage",
-        choices=("menu2", "menu5", "menu7", "remaining", "all"),
-        default="menu2",
-        help="한 번에 저장할 독립 단계(기본: menu2)",
+        choices=("menu5", "menu7"),
+        default="menu5",
+        help="한 번에 저장할 독립 단계(기본: menu5)",
     )
     return result
 
@@ -83,10 +78,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.through,
                 confirmed=args.confirm == "DELETE_SYNCED_DRIVE_DELTAS",
             )
-        elif args.command == "publish-local-base":
-            result = service.publish_local_base(args.date)
-        elif args.command == "publish-local-progress":
-            result = service.publish_local_progress(args.date)
+        elif args.command == "reset-menu57-cloud":
+            result = service.reset_menu57_cloud(
+                args.through,
+                confirmed=args.confirm == "DELETE_MENU2_CLOUD_DATA",
+            )
         else:
             target = args.date or datetime.now(ZoneInfo("Asia/Seoul")).date()
             result = service.cloud_run(target, stage=args.stage)

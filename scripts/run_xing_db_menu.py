@@ -32,6 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verification-marker", action="store_true")
     p.add_argument("--allow-today-before-close", action="store_true",
                    help="진단용. 일반 실행에서는 사용하지 마십시오.")
+    p.add_argument("--independent-target", action="store_true",
+                   help="메뉴 2 OHLCV 없이 요청 날짜와 종목 마스터로 메뉴 5·7 실행")
     return p
 
 
@@ -55,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
                     start=start, end=end, ticker=args.ticker, max_tickers=args.max_tickers,
                     chunk_days=args.chunk_days, progress=lambda m: print(m, flush=True),
                     force_refresh=args.force_refresh,
+                    independent_target=args.independent_target,
                 )
             else:
                 venues = tuple(v.strip().upper() for v in args.venues.split(",") if v.strip())
@@ -63,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
                     venues=venues, progress=lambda m: print(m, flush=True),
                     enforce_cutoff=not args.allow_today_before_close,
                     force_refresh=args.force_refresh, include_investor=not args.no_investor,
+                    independent_target=args.independent_target,
                 )
     except DataProviderUnavailableError as exc:
         print(f"[FAIL] {exc}", flush=True); return 3

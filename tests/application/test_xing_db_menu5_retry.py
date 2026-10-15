@@ -19,6 +19,12 @@ class _Repository:
     def list_stock_codes(self, _ticker=None, _limit=0) -> list[str]:
         return ["001450"]
 
+    def replace_cloud_stock_universe(self, _rows) -> int:
+        return 1
+
+    def list_cloud_stock_codes(self, _ticker=None, _limit=0, _offset=0) -> list[str]:
+        return ["001450"]
+
     def stock_trade_dates_by_code(self, _codes, _start, _end):
         return {"001450": {DAY}}
 
@@ -36,7 +42,9 @@ class _TransientBridge:
         self.always_fail = always_fail
         self.failures = 0
 
-    def raw_tr(self, _tr, values):
+    def raw_tr(self, tr, values):
+        if tr == "t8436":
+            return {"rows": [{"shcode": "001450", "hname": "TEST"}]}
         if values["volvalgb"] == "0" and values["msmdgb"] == "1":
             if self.always_fail or self.failures == 0:
                 self.failures += 1
@@ -51,6 +59,16 @@ class _TransientBridge:
 
 
 class Menu5RepairTests(unittest.TestCase):
+    def test_independent_target_does_not_read_menu2_trade_dates(self) -> None:
+        repository = _Repository()
+        repository.stock_trade_dates_by_code = lambda *_: self.fail("menu2 dependency")
+        report = XingDbMenuService(_TransientBridge(), repository).run_menu5(
+            start=DAY, end=DAY, independent_target=True
+        )
+
+        self.assertTrue(report.passed)
+        self.assertEqual({DAY}, repository.completed)
+
     def test_repairs_only_unresolved_stock_after_transient_failure(self) -> None:
         repository = _Repository()
         progress: list[str] = []

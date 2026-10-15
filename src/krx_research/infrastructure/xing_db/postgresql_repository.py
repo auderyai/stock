@@ -36,6 +36,12 @@ class PostgreSQLXingMenuRepository:
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS market_core.cloud_stock_universe (
+      stock_code varchar(6) PRIMARY KEY,
+      stock_name text NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS market_core.ls_index_membership_raw (
       as_of_date date NOT NULL,
       sector_code varchar(3) NOT NULL,
@@ -235,6 +241,42 @@ class PostgreSQLXingMenuRepository:
         codes = [str(r["stock_code"]).zfill(6) for r in rows if str(r["stock_code"]).isdigit()]
         if offset < 0:
             raise ValueError("offset은 0 이상이어야 합니다.")
+        selected = codes[offset:]
+        return selected[:limit] if limit else selected
+
+    def replace_cloud_stock_universe(self, rows: list[dict[str, Any]]) -> int:
+        values = [
+            (str(row.get("shcode") or "").strip(), str(row.get("hname") or "").strip())
+            for row in rows
+        ]
+        values = [value for value in values if re.fullmatch(r"\d{6}", value[0]) and value[1]
+                  and not self.SPAC.search(value[1])]
+        if not values:
+            raise ValueError("클라우드 메뉴 5·7 종목 목록이 0건입니다.")
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute("DELETE FROM market_core.cloud_stock_universe")
+            cur.executemany(
+                "INSERT INTO market_core.cloud_stock_universe(stock_code,stock_name) VALUES (%s,%s)",
+                values,
+            )
+        return len(values)
+
+    def list_cloud_stock_codes(self, ticker: str | None = None, limit: int = 0,
+                               offset: int = 0) -> list[str]:
+        if offset < 0:
+            raise ValueError("offset은 0 이상이어야 합니다.")
+        params: tuple[Any, ...] = ()
+        where = ""
+        if ticker:
+            token = str(ticker).strip()
+            where, params = (" WHERE stock_code=%s", (token.zfill(6),)) if token.isdigit() else (
+                " WHERE stock_name=%s", (token,)
+            )
+        rows = self.conn.execute(
+            "SELECT stock_code FROM market_core.cloud_stock_universe" + where + " ORDER BY stock_code",
+            params,
+        ).fetchall()
+        codes = [str(row["stock_code"]).zfill(6) for row in rows]
         selected = codes[offset:]
         return selected[:limit] if limit else selected
 

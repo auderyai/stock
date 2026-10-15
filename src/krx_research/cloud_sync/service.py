@@ -163,120 +163,84 @@ class StockDriveSyncService:
             result["status"] = "deleted"
             return result
 
-    def publish_local_base(self, target_date: date) -> dict[str, Any]:
-        """Publish a validated local menu-2 base without replacing cloud state."""
+    def reset_menu57_cloud(self, through: date, *, confirmed: bool = False) -> dict[str, Any]:
+        """Replace mixed cloud state with a verified menu-5/7-only snapshot."""
+        if not confirmed:
+            return {"status": "confirmation-required", "through": through.isoformat()}
         conninfo = database_conninfo()
         with self._context.drive() as drive, tempfile.TemporaryDirectory(
-            prefix="stock-base-"
+            prefix="stock-menu57-reset-"
         ) as name, self._connection(conninfo) as conn:
-            metadata = self._metadata(drive)
-            state_date = date.fromisoformat(str(metadata["state"]["reference_date"]))
-            if target_date < state_date:
-                raise CloudArchiveError(
-                    f"클라우드 상태보다 과거 기준일은 게시할 수 없습니다: "
-                    f"요청={target_date}, 상태={state_date}"
+            old = self._metadata(drive)
+            if old.get("state_checkpoint_pending"):
+                raise CloudArchiveError("저장 중인 체크포인트가 있어 클라우드 상태를 교체할 수 없습니다.")
+            with conn.transaction():
+                conn.execute(
+                    """CREATE TABLE IF NOT EXISTS market_core.cloud_stock_universe (
+                       stock_code varchar(6) PRIMARY KEY, stock_name text NOT NULL,
+                       updated_at timestamptz NOT NULL DEFAULT now())"""
                 )
-            completed = self._completed_stage_for(metadata, target_date)
-            if self._stage_completed(completed, "menu2"):
-                return {"status": "already-complete", "reference_date": target_date.isoformat()}
+                conn.execute("DELETE FROM market_core.cloud_stock_universe")
+                conn.execute(
+                    """INSERT INTO market_core.cloud_stock_universe(stock_code,stock_name)
+                       SELECT c.stock_code,COALESCE(s.stock_name,c.stock_code)
+                       FROM market_core.ls_investor_t1702_checkpoint c
+                       LEFT JOIN market_core.ls_security_master s USING(stock_code)
+                       WHERE c.trade_date=%s AND c.exchange_code='K'""",
+                    (through,),
+                )
+            counts = conn.execute(
+                """SELECT
+                   (SELECT count(*) FROM market_core.cloud_stock_universe) AS targets,
+                   (SELECT count(*) FROM market_core.venue_ohlcv_daily
+                    WHERE trade_date=%s AND venue='COMBINED') AS combined""",
+                (through,),
+            ).fetchone()
+            if not counts or not counts["targets"] or counts["targets"] != counts["combined"]:
+                raise CloudArchiveError(
+                    f"메뉴 5·7 로컬 검증 실패: 대상={counts and counts['targets']}, "
+                    f"COMBINED={counts and counts['combined']}"
+                )
 
             work = Path(name)
-            delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
-                work / f"delta-{target_date}.tar.gz",
-                target_date=target_date,
+            archive = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
+                work / "menu57-state.tar.gz",
+                pg_dump=self._executable("pg_dump"),
+                reference_date=through,
                 git_commit=self._git_commit(),
             )
-            market_rows = next(
-                (
-                    int(item["rows"])
-                    for item in delta.manifest["tables"]
-                    if item["relation"] == "market.ohlcv_daily"
-                ),
-                0,
-            )
-            if market_rows <= 0:
-                raise CloudArchiveError(
-                    f"로컬 메뉴 2 기준자료가 0건입니다: {target_date}"
-                )
-
-            encrypted = work / f"delta-{target_date}-menu2-local.enc"
-            ArchiveCipher.encrypt(delta.path, encrypted, self._context.credentials.archive_key)
-            file_id = drive.upload(
-                encrypted, name=encrypted.name, parent_id=str(metadata["delta_folder_id"])
-            )
-            record = self._delta_record(file_id, encrypted.name, encrypted, delta.manifest)
-            record["completed_stage"] = "menu2"
-            metadata["deltas"] = sorted(
-                [
-                    item for item in metadata.get("deltas", [])
-                    if item.get("reference_date") != target_date.isoformat()
-                ] + [record],
-                key=lambda item: item["reference_date"],
-            )[-400:]
-            metadata["completed_stage"] = self._record_stage(
-                metadata, target_date, "menu2"
-            )
-            metadata["state_checkpoint_pending"] = "menu2"
+            encrypted = work / "menu57-state.enc"
+            ArchiveCipher.encrypt(archive.path, encrypted, self._context.credentials.archive_key)
+            state_folder = drive.ensure_folder("worker-state")
+            delta_folder = drive.ensure_folder("daily-deltas")
+            previous_ids = {
+                str(item["id"]) for folder in (state_folder, delta_folder)
+                for item in drive.list_folder(folder)
+            }
+            file_id = drive.upload(encrypted, name=encrypted.name, parent_id=state_folder)
+            metadata = {
+                "format_version": 1,
+                "state": self._state_record(file_id, encrypted.name, encrypted, archive.manifest),
+                "state_slot": "menu57",
+                "delta_folder_id": delta_folder,
+                "deltas": [],
+                "completed_stage": "menu7",
+                "stage_dates": {through.isoformat(): "menu7"},
+                "local_synced_through": through.isoformat(),
+            }
             drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+            for old_id in previous_ids - {str(file_id)}:
+                drive.delete(old_id)
             return {
-                "status": "updated",
-                "reference_date": target_date.isoformat(),
-                "completed_stage": "menu2",
-                "market_rows": market_rows,
+                "status": "reset-menu57-only",
+                "reference_date": through.isoformat(),
+                "targets": counts["targets"],
+                "combined": counts["combined"],
+                "deleted_files": len(previous_ids - {str(file_id)}),
             }
 
-    def publish_local_progress(self, target_date: date) -> dict[str, Any]:
-        """Seed a historical cloud retry with verified local rows without claiming completion."""
-        conninfo = database_conninfo()
-        day = target_date.isoformat()
-        with self._context.drive() as drive, tempfile.TemporaryDirectory(
-            prefix="stock-progress-"
-        ) as name, self._connection(conninfo) as conn:
-            metadata = self._metadata(drive)
-            work = Path(name)
-            delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
-                work / f"delta-{day}.tar.gz",
-                target_date=target_date,
-                git_commit=self._git_commit(),
-            )
-            market_rows = next((
-                int(item["rows"]) for item in delta.manifest["tables"]
-                if item["relation"] == "market.ohlcv_daily"
-            ), 0)
-            if market_rows <= 0:
-                raise CloudArchiveError(f"로컬 기준자료가 0건입니다: {day}")
-
-            encrypted = work / f"delta-{day}-local-progress.enc"
-            ArchiveCipher.encrypt(delta.path, encrypted, self._context.credentials.archive_key)
-            file_id = drive.upload(
-                encrypted, name=encrypted.name,
-                parent_id=str(metadata["delta_folder_id"]),
-            )
-            record = self._delta_record(file_id, encrypted.name, encrypted, delta.manifest)
-            record["completed_stage"] = "menu2"
-            metadata["deltas"] = sorted(
-                [item for item in metadata.get("deltas", [])
-                 if item.get("reference_date") != day] + [record],
-                key=lambda item: item["reference_date"],
-            )[-400:]
-            stages = dict(metadata.get("stage_dates") or {})
-            stages[day] = "menu2"
-            metadata["stage_dates"] = stages
-            replay = set(metadata.get("replay_delta_dates") or [])
-            replay.add(day)
-            metadata["replay_delta_dates"] = sorted(replay)
-            if metadata.get("menu5_reference_date") == day:
-                metadata.pop("menu5_reference_date", None)
-                metadata.pop("menu5_next_offset", None)
-            drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
-            return {
-                "status": "updated", "reference_date": day,
-                "completed_stage": "menu2", "market_rows": market_rows,
-                "delta_rows": self._rows(delta.manifest),
-            }
-
-    def cloud_run(self, target_date: date, *, stage: str = "menu2") -> dict[str, Any]:
-        if stage not in {"menu2", "menu5", "menu7", "remaining", "all"}:
+    def cloud_run(self, target_date: date, *, stage: str = "menu5") -> dict[str, Any]:
+        if stage not in {"menu5", "menu7"}:
             raise ValueError(f"지원하지 않는 클라우드 단계입니다: {stage}")
         conninfo = database_conninfo()
         with self._context.drive() as drive, tempfile.TemporaryDirectory(prefix="stock-cloud-") as name:
@@ -292,51 +256,20 @@ class StockDriveSyncService:
                 archive_service = DatabaseArchiveService(conn, conninfo=conninfo)
                 archive_service.restore_snapshot(state_archive, psql=self._executable("psql"))
                 self._apply_cloud_deltas(drive, metadata, work, conn)
-                before = self._latest_date(conn)
-                target_ready = self._market_date_exists(conn, target_date)
                 menu5_complete = self._menu5_complete(conn, target_date)
 
             commit = self._git_commit()
             checkpoints: list[dict[str, Any]] = []
-            actual = before
-            previous_stage = self._completed_stage_for(metadata, before)
             completed_stage = self._completed_stage_for(metadata, target_date)
-            self._require_previous_date_completed(
-                before, target_date, previous_stage, stage
-            )
-
-            if stage in {"menu2", "all"}:
-                menu2 = self._run_menu2_with_retry(target_date.isoformat())
-                with self._connection(conninfo) as conn:
-                    actual = self._latest_date(conn)
-                no_new = self._validate_menu2_date(before, actual, target_date, menu2)
-                if no_new is not None:
-                    return no_new
-                if before != actual:
-                    metadata, checkpoint = self._publish_checkpoint(
-                        drive, metadata, work, conninfo, actual, commit, "menu2"
-                    )
-                    checkpoints.append(checkpoint)
-                if stage == "menu2":
-                    return {
-                        "status": "updated" if checkpoints else "already-complete",
-                        "reference_date": target_date.isoformat(),
-                        "completed_stage": self._completed_stage_for(
-                            metadata, target_date
-                        ),
-                        "checkpoints": checkpoints,
-                    }
-
-            self._require_stage_base(target_ready, target_date, stage)
             day = target_date.isoformat()
 
-            if stage in {"menu5", "remaining", "all"} and (
+            if stage == "menu5" and (
                 not self._stage_completed(completed_stage, "menu5")
                 or not menu5_complete
             ):
                 metadata, menu5_checkpoints = self._run_menu5_checkpointed(
                     drive, metadata, work, conninfo, target_date, commit,
-                    state_reference_date=actual,
+                    state_reference_date=target_date,
                 )
                 checkpoints.extend(menu5_checkpoints)
                 completed_stage = "menu5"
@@ -357,13 +290,16 @@ class StockDriveSyncService:
                     "checkpoints": checkpoints,
                 }
 
-            if stage in {"menu7", "remaining", "all"} and not self._stage_completed(
+            if stage == "menu7" and not self._stage_completed(completed_stage, "menu5"):
+                raise CloudArchiveError(f"메뉴 5 완료 전에는 메뉴 7을 실행할 수 없습니다: {day}")
+
+            if stage == "menu7" and not self._stage_completed(
                 completed_stage, "menu7"
             ):
                 self._run_menu7_with_retry(day)
                 metadata, checkpoint = self._publish_checkpoint(
                     drive, metadata, work, conninfo, target_date, commit, "menu7",
-                    state_reference_date=actual,
+                    state_reference_date=target_date,
                 )
                 checkpoints.append(checkpoint)
 
@@ -413,7 +349,10 @@ class StockDriveSyncService:
         return completed.returncode
 
     def _run_menu7_with_retry(self, day: str) -> None:
-        arguments = ("--menu", "7", "--start", day, "--end", day, "--no-investor")
+        arguments = (
+            "--menu", "7", "--start", day, "--end", day,
+            "--no-investor", "--independent-target",
+        )
         result = self._run(
             "scripts/run_xing_db_menu.py", *arguments, accepted=(0, 3)
         )
@@ -422,19 +361,6 @@ class StockDriveSyncService:
                 self._run("scripts/run_xing_db_menu.py", *arguments)
             except CloudArchiveError as exc:
                 raise TransientSourceError("메뉴 7 공급원 호출이 2회 실패했습니다.") from exc
-
-    def _run_menu2_with_retry(self, day: str) -> int:
-        arguments = (
-            "--as-of", day,
-            "--no-investor", "--markets", "KOSPI", "KOSDAQ",
-        )
-        for _ in range(2):
-            result = self._run(
-                "scripts/run_daily_pipeline.py", *arguments, accepted=(0, 2, 3)
-            )
-            if result != 3:
-                return result
-        return 3
 
     def _run_menu5_checkpointed(
         self,
@@ -466,6 +392,7 @@ class StockDriveSyncService:
                     "--chunk-days", "1",
                     "--max-tickers", str(batch_size),
                     "--ticker-offset", str(offset),
+                    "--independent-target",
                     "--empty-is-complete",
                     accepted=(0, 3, 4),
                 )
@@ -689,55 +616,6 @@ class StockDriveSyncService:
             )
             applier.apply(archive)
 
-    @staticmethod
-    def _validate_menu2_date(
-        before: date | None,
-        actual: date | None,
-        target_date: date,
-        exit_code: int,
-    ) -> dict[str, str] | None:
-        # A restored snapshot may already contain the requested date.  In that
-        # case menu 2 correctly reports a completed/skipped update and the
-        # coordinator must continue to menus 5 and 7 instead of requiring a
-        # strictly newer date.
-        if actual == target_date:
-            return None
-        if actual is None or (before is not None and actual <= before):
-            if exit_code == 2:
-                return {
-                    "status": "no-new-trading-day",
-                    "requested_date": target_date.isoformat(),
-                }
-            if exit_code == 3:
-                return {
-                    "status": "provider-failed",
-                    "requested_date": target_date.isoformat(),
-                }
-            raise CloudArchiveError("메뉴 2 후 요청 거래일이 확인되지 않았습니다.")
-        raise CloudArchiveError(
-            f"요청일과 DB 최신 거래일이 다릅니다: 요청={target_date}, DB={actual}"
-        )
-
-    @staticmethod
-    def _require_reference_date(
-        actual: date | None, target_date: date, stage: str
-    ) -> None:
-        if actual != target_date:
-            raise CloudArchiveError(
-                f"{stage} 실행 전 메뉴 2 기준일이 준비되지 않았습니다: "
-                f"요청={target_date}, DB={actual}"
-            )
-
-    @classmethod
-    def _require_stage_base(
-        cls, target_ready: bool, target_date: date, stage: str
-    ) -> None:
-        """Require the requested trading-day base before later-stage collection."""
-        if not target_ready:
-            raise CloudArchiveError(
-                f"{stage} 실행 전 메뉴 2 기준일이 준비되지 않았습니다: 요청={target_date}"
-            )
-
     @classmethod
     def _completed_stage_for(
         cls, metadata: dict[str, Any], reference_date: date | None
@@ -772,7 +650,7 @@ class StockDriveSyncService:
 
     @staticmethod
     def _stage_completed(completed_stage: str, requested_stage: str) -> bool:
-        order = {"": 0, "menu2": 1, "menu5-partial": 2, "menu5": 3, "menu7": 4}
+        order = {"": 0, "menu5-partial": 1, "menu5": 2, "menu7": 3}
         return order.get(completed_stage, 0) >= order[requested_stage]
 
     @staticmethod
@@ -805,26 +683,6 @@ class StockDriveSyncService:
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
         return [str(item["reference_date"]) for item in expired]
 
-    @staticmethod
-    def _require_previous_date_completed(
-        current_date: date | None,
-        target_date: date,
-        completed_stage: str,
-        requested_stage: str,
-    ) -> None:
-        """Do not advance the cloud state while the prior date is incomplete."""
-        if (
-            requested_stage in {"menu2", "all"}
-            and current_date is not None
-            and current_date < target_date
-            and completed_stage != "menu7"
-        ):
-            raise CloudArchiveError(
-                "이전 기준일 작업이 완료되지 않아 다음 날짜를 시작할 수 없습니다: "
-                f"이전={current_date.isoformat()}, 완료단계={completed_stage or '없음'}, "
-                f"요청={target_date.isoformat()}"
-            )
-
     def _connection(self, conninfo: str | None = None):
         return psycopg.connect(conninfo or database_conninfo(), row_factory=dict_row)
 
@@ -837,31 +695,17 @@ class StockDriveSyncService:
         return value if completed.returncode == 0 and len(value) == 40 else "unknown"
 
     @staticmethod
-    def _latest_date(conn) -> date | None:
-        row = conn.execute("SELECT max(trade_date)::date AS day FROM market.ohlcv_daily").fetchone()
-        return row["day"] if row else None
-
-    @staticmethod
     def _menu5_complete(conn, target_date: date) -> bool:
         row = conn.execute(
             """WITH target AS (
-                   SELECT DISTINCT ticker::text AS stock_code
-                   FROM market.ohlcv_daily WHERE trade_date::date=%s)
+                   SELECT stock_code FROM market_core.cloud_stock_universe)
                SELECT count(*) AS targets, count(done.stock_code) AS completed
                FROM target LEFT JOIN market_core.ls_investor_t1702_checkpoint done
                  ON done.stock_code=target.stock_code
                 AND done.trade_date=%s AND done.exchange_code='K'""",
-            (target_date, target_date),
-        ).fetchone()
-        return bool(row and row["targets"] and row["targets"] == row["completed"])
-
-    @staticmethod
-    def _market_date_exists(conn, target_date: date) -> bool:
-        row = conn.execute(
-            "SELECT EXISTS(SELECT 1 FROM market.ohlcv_daily WHERE trade_date::date=%s) AS found",
             (target_date,),
         ).fetchone()
-        return bool(row and row["found"])
+        return bool(row and row["targets"] and row["targets"] == row["completed"])
 
     @staticmethod
     def _executable(name: str) -> Path:

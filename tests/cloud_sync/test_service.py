@@ -46,62 +46,6 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual((0, 3), run.call_args_list[0].kwargs["accepted"])
         self.assertNotIn("accepted", run.call_args_list[1].kwargs)
 
-    def test_cloud_menu2_retries_transient_provider_failures(self) -> None:
-        root = Path.cwd()
-        credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
-        service = StockDriveSyncService(SyncContext(root, credentials))
-
-        with patch.object(service, "_run", side_effect=[3, 3]) as run:
-            result = service._run_menu2_with_retry("2026-10-12")
-
-        self.assertEqual(3, result)
-        self.assertEqual(2, run.call_count)
-        self.assertEqual((0, 2, 3), run.call_args_list[0].kwargs["accepted"])
-        self.assertEqual((0, 2, 3), run.call_args_list[1].kwargs["accepted"])
-
-    def test_cloud_menu2_returns_confirmed_holiday_without_retry(self) -> None:
-        root = Path.cwd()
-        credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
-        service = StockDriveSyncService(SyncContext(root, credentials))
-
-        with patch.object(service, "_run", return_value=2) as run:
-            result = service._run_menu2_with_retry("2026-10-09")
-
-        self.assertEqual(2, result)
-        run.assert_called_once()
-
-    def test_existing_target_date_continues_to_later_menus(self) -> None:
-        target = date(2026, 10, 12)
-
-        result = StockDriveSyncService._validate_menu2_date(
-            target, target, target, 0
-        )
-
-        self.assertIsNone(result)
-
-    def test_confirmed_holiday_returns_no_new_status(self) -> None:
-        before = date(2026, 10, 8)
-        target = date(2026, 10, 9)
-
-        result = StockDriveSyncService._validate_menu2_date(
-            before, before, target, 2
-        )
-
-        self.assertEqual(
-            {"status": "no-new-trading-day", "requested_date": "2026-10-09"},
-            result,
-        )
-
-    def test_provider_failure_is_reported_without_discarding_checkpoints(self) -> None:
-        before = date(2026, 10, 12)
-        result = StockDriveSyncService._validate_menu2_date(
-            before, before, date(2026, 10, 13), 3
-        )
-        self.assertEqual(
-            {"status": "provider-failed", "requested_date": "2026-10-13"},
-            result,
-        )
-
     def test_public_result_reports_latest_persisted_stage(self) -> None:
         result = StockDriveSyncService._public_result(
             {
@@ -113,32 +57,10 @@ class CloudSyncServiceTests(unittest.TestCase):
 
         self.assertEqual("menu5", result["completed_stage"])
 
-    def test_later_stage_requires_exact_menu2_reference_date(self) -> None:
-        with self.assertRaisesRegex(Exception, "기준일이 준비되지 않았습니다"):
-            StockDriveSyncService._require_reference_date(
-                date(2026, 10, 8), date(2026, 10, 12), "menu5"
-            )
-
-    def test_later_stage_accepts_exact_menu2_reference_date(self) -> None:
-        StockDriveSyncService._require_reference_date(
-            date(2026, 10, 12), date(2026, 10, 12), "menu7"
-        )
-
-    def test_later_stage_rejects_older_reference_date(self) -> None:
-        with self.assertRaisesRegex(CloudArchiveError, "기준일이 준비되지 않았습니다"):
-            StockDriveSyncService._require_stage_base(
-                False, date(2026, 10, 13), "menu5"
-            )
-
-    def test_historical_stage_accepts_existing_market_base(self) -> None:
-        StockDriveSyncService._require_stage_base(
-            True, date(2026, 10, 13), "menu5"
-        )
-
     def test_completed_menu_is_not_run_again(self) -> None:
         self.assertTrue(StockDriveSyncService._stage_completed("menu5", "menu5"))
         self.assertTrue(StockDriveSyncService._stage_completed("menu7", "menu5"))
-        self.assertFalse(StockDriveSyncService._stage_completed("menu2", "menu5"))
+        self.assertFalse(StockDriveSyncService._stage_completed("", "menu5"))
         self.assertFalse(StockDriveSyncService._stage_completed("menu5-partial", "menu5"))
 
     def test_menu5_batches_checkpoint_and_finish(self) -> None:
@@ -203,7 +125,7 @@ class CloudSyncServiceTests(unittest.TestCase):
         connection.__enter__.return_value = MagicMock()
         metadata = {
             "state": {"id": "state", "name": "state.enc"},
-            "completed_stage": "menu2",
+            "completed_stage": "",
         }
         completed = {**metadata, "completed_stage": "menu5"}
 
@@ -218,10 +140,6 @@ class CloudSyncServiceTests(unittest.TestCase):
         ), patch.object(
             service, "_apply_cloud_deltas"
         ), patch.object(
-            service, "_latest_date", return_value=target
-        ), patch.object(
-            service, "_market_date_exists", return_value=True
-        ), patch.object(
             service, "_menu5_complete", return_value=False
         ), patch.object(
             service, "_git_commit", return_value="abcdef123456"
@@ -234,38 +152,6 @@ class CloudSyncServiceTests(unittest.TestCase):
 
         self.assertEqual("menu5", result["completed_stage"])
         self.assertEqual(7, result["delta_rows"])
-
-    def test_local_base_rejects_zero_market_rows_before_upload(self) -> None:
-        target = date(2026, 10, 14)
-        root = Path.cwd()
-        service = StockDriveSyncService(SyncContext(
-            root, DriveCredentials("id", "secret", "refresh", "folder", "key")
-        ))
-        drive = MagicMock(root_folder_id="folder")
-        drive.__enter__.return_value = drive
-        connection = MagicMock()
-        connection.__enter__.return_value = connection
-        archive = MagicMock(
-            path=root / "empty.tar.gz",
-            manifest={"tables": [{"relation": "market.ohlcv_daily", "rows": 0}]},
-        )
-        metadata = {
-            "state": {"reference_date": "2026-10-12"},
-            "delta_folder_id": "deltas",
-        }
-
-        with patch.object(SyncContext, "drive", return_value=drive), patch.object(
-            service, "_metadata", return_value=metadata
-        ), patch.object(
-            service, "_connection", return_value=connection
-        ), patch(
-            "krx_research.cloud_sync.service.DatabaseArchiveService"
-        ) as archive_service:
-            archive_service.return_value.export_delta.return_value = archive
-            with self.assertRaisesRegex(CloudArchiveError, "0건"):
-                service.publish_local_base(target)
-
-        drive.upload.assert_not_called()
 
     def test_failed_menu5_batch_is_saved_without_advancing_offset(self) -> None:
         root = Path.cwd()
@@ -330,17 +216,27 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertTrue(
             StockDriveSyncService._menu5_complete(connection, date(2026, 10, 13))
         )
+        self.assertIn("cloud_stock_universe", connection.execute.call_args.args[0])
 
-    def test_next_date_waits_until_previous_menu7_checkpoint(self) -> None:
-        with self.assertRaisesRegex(CloudArchiveError, "이전 기준일 작업이 완료되지 않아"):
-            StockDriveSyncService._require_previous_date_completed(
-                date(2026, 10, 12), date(2026, 10, 13), "menu5", "menu2"
+    def test_cloud_stages_explicitly_use_independent_targets(self) -> None:
+        service = StockDriveSyncService(SyncContext(
+            Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        with patch.object(service, "_run", side_effect=[4, 0]) as run, patch.object(
+            service, "_connection", return_value=connection
+        ), patch.object(service, "_menu5_complete", return_value=True), patch.object(
+            service, "_publish_checkpoint",
+            return_value=({}, {"stage": "menu5", "delta_rows": 1}),
+        ):
+            service._run_menu5_checkpointed(
+                object(), {}, Path.cwd(), "db", date(2026, 10, 15), "abc"
             )
+            service._run_menu7_with_retry("2026-10-15")
 
-    def test_next_date_starts_after_previous_menu7_checkpoint(self) -> None:
-        StockDriveSyncService._require_previous_date_completed(
-            date(2026, 10, 12), date(2026, 10, 13), "menu7", "menu2"
-        )
+        self.assertIn("--independent-target", run.call_args_list[0].args)
+        self.assertIn("--independent-target", run.call_args_list[1].args)
 
     def test_cleanup_deletes_only_locally_applied_deltas_older_than_30_days(self) -> None:
         root = Path.cwd()
