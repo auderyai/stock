@@ -4,8 +4,7 @@
 
 - GitHub Actions는 평일 20:37(Asia/Seoul)에 임시 PostgreSQL 16을 시작합니다.
 - Google Drive의 메뉴 5·7 전용 암호화 상태를 복원한 뒤 메뉴 5, 7을 순서대로 실행합니다.
-- 메뉴 5·7은 공급원에서 독립 종목 목록을 갱신하므로 로컬 메뉴 2 자료를 요구하지 않습니다.
-- 메뉴 2는 로컬 PC 전용이며 GitHub Actions와 Google Drive에 저장하지 않습니다.
+- 각 단계는 공급원에서 독립 종목 목록을 갱신하며 클라우드 전용 테이블만 사용합니다.
 - 메뉴 7은 메뉴 5를 중복 실행하지 않도록 `--no-investor`를 사용합니다.
 - 성공한 경우에만 일일 변경분과 다음 작업 상태를 AES-256-GCM으로 암호화해 Drive에 올립니다.
 - PC는 `sync-local`로 아직 반영하지 않은 변경분만 PostgreSQL `UPSERT`합니다.
