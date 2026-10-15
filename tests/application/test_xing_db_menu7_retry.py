@@ -69,6 +69,7 @@ class _TransientBridge:
 class Menu7RepairTests(unittest.TestCase):
     def test_independent_target_does_not_read_local_price_dates(self) -> None:
         repository = _Repository()
+        repository.latest_market_date = lambda: self.fail("local latest-date dependency")
         repository.stock_trade_dates_by_code = lambda *_: self.fail("local price dependency")
         report = XingDbMenuService(_TransientBridge(), repository).run_menu7(
             start=DAY, end=DAY, include_investor=False, independent_target=True

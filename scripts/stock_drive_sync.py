@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 import json
 from pathlib import Path
 import sys
@@ -22,6 +22,11 @@ from krx_research.cloud_sync.service import (
 
 def _date(value: str) -> date:
     return date.fromisoformat(value)
+
+
+def _default_target_date(now: datetime | None = None) -> date:
+    current = now or datetime.now(ZoneInfo("Asia/Seoul"))
+    return current.date() if current.time() >= time(20, 10) else current.date() - timedelta(days=1)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -76,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
                 confirmed=args.confirm == "DELETE_SYNCED_DRIVE_DELTAS",
             )
         else:
-            target = args.date or datetime.now(ZoneInfo("Asia/Seoul")).date()
+            target = args.date or _default_target_date()
             result = service.cloud_run(target, stage=args.stage)
         with log_path.open("a", encoding="utf-8") as log:
             log.write(

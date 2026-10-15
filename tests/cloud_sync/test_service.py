@@ -218,7 +218,7 @@ class CloudSyncServiceTests(unittest.TestCase):
         )
         self.assertIn("cloud_stock_universe", connection.execute.call_args.args[0])
 
-    def test_cloud_stages_explicitly_use_independent_targets(self) -> None:
+    def test_cloud_stages_use_dedicated_runner(self) -> None:
         service = StockDriveSyncService(SyncContext(
             Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
         ))
@@ -235,8 +235,10 @@ class CloudSyncServiceTests(unittest.TestCase):
             )
             service._run_menu7_with_retry("2026-10-15")
 
-        self.assertIn("--independent-target", run.call_args_list[0].args)
-        self.assertIn("--independent-target", run.call_args_list[1].args)
+        self.assertEqual("scripts/run_cloud_xing_stage.py", run.call_args_list[0].args[0])
+        self.assertEqual("scripts/run_cloud_xing_stage.py", run.call_args_list[1].args[0])
+        self.assertEqual("5", run.call_args_list[0].args[2])
+        self.assertEqual("7", run.call_args_list[1].args[2])
 
     def test_cleanup_deletes_only_locally_applied_deltas_older_than_30_days(self) -> None:
         root = Path.cwd()

@@ -6,6 +6,27 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class StockDriveWorkflowTests(unittest.TestCase):
+    def test_cloud_execution_surface_has_no_local_price_stage(self) -> None:
+        paths = (
+            ".github/workflows/stock-daily-google-drive.yml",
+            ".github/workflows/stock-drive-stage.yml",
+            "scripts/stock_drive_sync.py",
+            "scripts/run_cloud_xing_stage.py",
+            "src/krx_research/cloud_sync/service.py",
+            "src/krx_research/cloud_sync/models.py",
+            "requirements-cloud-worker.txt",
+        )
+        source = "\n".join((ROOT / path).read_text(encoding="utf-8") for path in paths)
+        forbidden = (
+            "menu" + "2",
+            "메뉴" + " 2",
+            "market." + "ohlcv_daily",
+            "py" + "krx",
+            "finance-" + "datareader",
+        )
+        for token in forbidden:
+            self.assertNotIn(token.lower(), source.lower())
+
     def test_scheduled_run_executes_only_cloud_stages(self) -> None:
         workflow = (ROOT / ".github/workflows/stock-daily-google-drive.yml").read_text(
             encoding="utf-8"

@@ -189,7 +189,7 @@ class XingDbMenuService:
                   independent_target: bool = False) -> ActionReport:
         if start > end:
             raise ValueError("start가 end보다 늦습니다.")
-        latest_db_day = self._repo.latest_market_date()
+        latest_db_day = None if independent_target else self._repo.latest_market_date()
         cutoff_base = None if independent_target else latest_db_day
         effective_end = DailyCloseWritePolicy.resolve_end_date(end, cutoff_base) if enforce_cutoff else end
         if start > effective_end:
@@ -335,7 +335,7 @@ class XingDbMenuService:
                   independent_target: bool = False) -> ActionReport:
         if start > end:
             raise ValueError("start가 end보다 늦습니다.")
-        latest_db_day = self._repo.latest_market_date()
+        latest_db_day = None if independent_target else self._repo.latest_market_date()
         cutoff_base = None if independent_target else latest_db_day
         effective_end = DailyCloseWritePolicy.resolve_end_date(end, cutoff_base) if enforce_cutoff else end
         if start > effective_end:

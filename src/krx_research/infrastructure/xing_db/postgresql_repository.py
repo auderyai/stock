@@ -449,3 +449,42 @@ class PostgreSQLXingMenuRepository:
             return int(float(str(value).strip() or 0))
         except (TypeError, ValueError):
             return 0
+
+
+class PostgreSQLXingCloudRepository(PostgreSQLXingMenuRepository):
+    """Menu 5/7 repository that initializes only cloud-owned relations."""
+
+    CLOUD_DDL = """
+    CREATE SCHEMA IF NOT EXISTS market_core;
+    CREATE TABLE IF NOT EXISTS market_core.cloud_stock_universe (
+      stock_code varchar(6) PRIMARY KEY,
+      stock_name text NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS market_core.ls_investor_t1702_raw (
+      stock_code varchar(6) NOT NULL,
+      trade_date date NOT NULL,
+      metric_code char(1) NOT NULL CHECK (metric_code IN ('0','1')),
+      side_code char(1) NOT NULL CHECK (side_code IN ('1','2')),
+      exchange_code char(1) NOT NULL DEFAULT 'K',
+      source_fields jsonb NOT NULL,
+      collected_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(stock_code,trade_date,metric_code,side_code,exchange_code)
+    );
+    CREATE TABLE IF NOT EXISTS market_core.ls_investor_t1702_checkpoint (
+      stock_code varchar(6) NOT NULL,
+      trade_date date NOT NULL,
+      exchange_code char(1) NOT NULL,
+      completed_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(stock_code,trade_date,exchange_code)
+    );
+    """
+
+    def initialize(self) -> None:
+        with self.conn.transaction():
+            self.conn.execute(self.CLOUD_DDL)
+            row = self.conn.execute(
+                "SELECT to_regclass('market_core.venue_ohlcv_daily') AS relation"
+            ).fetchone()
+            if not row or row["relation"] is None:
+                raise RuntimeError("클라우드 메뉴 7 저장 테이블이 없습니다.")

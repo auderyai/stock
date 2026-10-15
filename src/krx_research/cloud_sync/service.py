@@ -275,15 +275,14 @@ class StockDriveSyncService:
 
     def _run_menu7_with_retry(self, day: str) -> None:
         arguments = (
-            "--menu", "7", "--start", day, "--end", day,
-            "--no-investor", "--independent-target",
+            "--stage", "7", "--start", day, "--end", day,
         )
         result = self._run(
-            "scripts/run_xing_db_menu.py", *arguments, accepted=(0, 3)
+            "scripts/run_cloud_xing_stage.py", *arguments, accepted=(0, 3)
         )
         if result == 3:
             try:
-                self._run("scripts/run_xing_db_menu.py", *arguments)
+                self._run("scripts/run_cloud_xing_stage.py", *arguments)
             except CloudArchiveError as exc:
                 raise TransientSourceError("메뉴 7 공급원 호출이 2회 실패했습니다.") from exc
 
@@ -311,14 +310,13 @@ class StockDriveSyncService:
         while True:
             for attempt in range(2):
                 result = self._run(
-                    "scripts/update_ls_investor_date_range.py",
+                    "scripts/run_cloud_xing_stage.py",
+                    "--stage", "5",
                     "--start", day,
                     "--end", day,
                     "--chunk-days", "1",
                     "--max-tickers", str(batch_size),
                     "--ticker-offset", str(offset),
-                    "--independent-target",
-                    "--empty-is-complete",
                     accepted=(0, 3, 4),
                 )
                 if result != 3:

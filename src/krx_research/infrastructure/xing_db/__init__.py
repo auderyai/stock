@@ -1,3 +1,6 @@
-from .postgresql_repository import PostgreSQLXingMenuRepository
+from .postgresql_repository import (
+    PostgreSQLXingCloudRepository,
+    PostgreSQLXingMenuRepository,
+)
 
-__all__ = ["PostgreSQLXingMenuRepository"]
+__all__ = ["PostgreSQLXingCloudRepository", "PostgreSQLXingMenuRepository"]
