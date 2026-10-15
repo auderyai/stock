@@ -19,10 +19,12 @@ def main() -> None:
     assert service.assess(frame(252))[1].state == "자료부족"
     data = frame(253); data.iloc[-1] = [240, 300, 235, 250, 2_000]
     results = service.assess(data)
-    assert results[1].state == "신고가·거래량 확인" and "2.00배" in results[1].detail
+    assert results[1].state == "최고가 돌파·거래량 증가" and "2.00배" in results[1].detail
+    assert "최근 1년 최고가" in results[1].detail
     assert {level[0] for level in results[1].levels} == {"price", "volume"}
     assert {level[0] for level in results[2].levels} == {"price", "stochastic"}
-    assert "+" not in "\n".join(result.text() for result in results)
+    explanations = "\n".join(result.text() for result in results)
+    assert "현재 판단:" in explanations and "쉬운 설명:" in explanations and "+" not in explanations
     for timeframe in ("D", "W", "M", "Q", "Y"):
         bundle = ChartService().prepare("TEST", data, timeframe=timeframe, display_limit=10)
         assert len(bundle.frame) <= 10 and len(bundle.assessments) == 3

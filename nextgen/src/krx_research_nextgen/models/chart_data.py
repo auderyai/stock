@@ -18,7 +18,8 @@ class StrategyAssessment:
     points: tuple[tuple[pd.Timestamp, float, str], ...] = ()
     levels: tuple[tuple[str, float, str], ...] = ()
 
-    def text(self) -> str: return f"{self.strategy}: {self.state} — {self.detail}"
+    def text(self) -> str:
+        return f"[{self.strategy}]\n현재 판단: {self.state}\n쉬운 설명: {self.detail}"
 
 
 @dataclass(frozen=True)

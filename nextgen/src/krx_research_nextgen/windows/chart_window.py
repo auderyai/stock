@@ -31,7 +31,7 @@ class ChartWindow(QMainWindow):
         page.setMinimumWidth(0); page.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.chart = EmbeddedFinplotWidget(); layout.addWidget(self.chart, 1)
         insight = QHBoxLayout(); layout.addLayout(insight)
-        strategy = QGroupBox("차트 고전전략 판정"); strategy_row = QHBoxLayout(strategy)
+        strategy = QGroupBox("차트 고전전략 판정 · 쉬운 설명"); strategy_row = QHBoxLayout(strategy)
         self.strategy_mode = QComboBox(); self.strategy_mode.addItems(STRATEGY_OPTIONS)
         self.strategy_text = QLabel("차트 자료를 불러온 뒤 자동으로 판정합니다."); self.strategy_text.setWordWrap(True)
         self.strategy_mode.currentTextChanged.connect(self._show_strategy)
@@ -145,6 +145,6 @@ class ChartWindow(QMainWindow):
         if self._bundle is None: return
         selected = self.strategy_mode.currentText()
         rows = self._bundle.assessments if selected == "전체" else tuple(row for row in self._bundle.assessments if row.strategy == selected)
-        text = "\n".join(row.text() for row in rows)
-        self.strategy_text.setText(text + "\n※ 저장된 DB 가격자료에 대한 규칙 기반 참고 판정입니다.")
+        text = "\n\n".join(row.text() for row in rows)
+        self.strategy_text.setText(text + "\n※ 과거 DB 자료에 규칙을 적용한 참고 결과이며, 매매 지시나 미래 예측이 아닙니다.")
         self.chart.set_strategy(rows[0] if selected != "전체" and rows else None, self._bundle.frame)

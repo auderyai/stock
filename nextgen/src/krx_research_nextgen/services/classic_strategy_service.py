@@ -64,8 +64,10 @@ class ClassicStrategyService:
             points, direction = swings[end - 6:end], self._impulse(swings[end - 6:end])
             if direction:
                 labels = tuple((date, price, str(index)) for index, (date, price, _) in enumerate(points))
-                return self._item(name, f"{direction} 충격 5파 후보", "확정 스윙이 파동2의 100% 초과 되돌림 금지, 파동3 최단 금지, 파동4·파동1 영역 비중첩 규칙을 충족합니다. 파동 차수와 향후 진행은 확정하지 않습니다.", labels)
-        return self._item(name, "유효 충격파 미확인", "최근 확정 스윙에서 엘리어트 충격파의 세 가지 필수 규칙을 모두 충족하는 연속 5파를 찾지 못했습니다.")
+                detail = (f"최근 고점과 저점의 움직임이 {direction} 방향의 5단계 파동 모양과 비슷합니다. "
+                          "다만 조건에 맞는 모양을 찾았다는 뜻일 뿐, 다음 가격 방향을 예측하거나 확정한 것은 아닙니다.")
+                return self._item(name, f"{direction} 5단계 파동 모양 발견", detail, labels)
+        return self._item(name, "5단계 파동 모양 없음", "최근 가격 흐름에서는 5단계 파동의 필수 조건이 모두 맞는 구간을 찾지 못했습니다.")
 
     def _livermore(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "제시 리버모어"
@@ -74,10 +76,14 @@ class ClassicStrategyService:
         pivot, average = float(prior.high.max()), float(prior.volume.tail(20).mean())
         ratio = float(last.volume) / average if average > 0 else np.nan
         breakout, heavy = float(last.close) > pivot, np.isfinite(ratio) and ratio >= 1.5
-        state = ("신고가·거래량 확인" if breakout and heavy else "신고가 돌파·거래량 미확인" if breakout else
-                 "피벗 돌파 대기" if float(last.close) >= pivot * .97 else "피벗 대기")
-        detail = f"직전 252거래일 피벗 {pivot:,.0f}, 종가 {last.close:,.0f}, 당일 제외 직전 20일 평균 대비 거래량 {ratio:.2f}배입니다. 확대 거래량의 운영 기준은 1.50배이며 시장·업종 확인은 별도입니다."
-        return self._item(name, state, detail, levels=(("price", pivot, "리버모어 피벗"), ("volume", average, "직전 20일 평균 거래량")))
+        state = ("최고가 돌파·거래량 증가" if breakout and heavy else "최고가 돌파·거래량 부족" if breakout else
+                 "최고가에 가까움·돌파 대기" if float(last.close) >= pivot * .97 else "최고가 돌파 전")
+        price = ("최근 1년 최고가를 넘어섰습니다" if breakout else
+                 f"최근 1년 최고가 {pivot:,.0f}원보다 {(pivot - float(last.close)) / pivot * 100:.1f}% 낮습니다")
+        volume = "넘었습니다" if heavy else "넘지 못했습니다"
+        detail = (f"현재 종가는 {last.close:,.0f}원으로 {price}. 오늘 거래량은 최근 20일 평균의 "
+                  f"{ratio:.2f}배로 증가 기준 1.50배를 {volume}. 가격과 거래량이 모두 기준을 만족해야 돌파 신호로 봅니다.")
+        return self._item(name, state, detail, levels=(("price", pivot, "최근 1년 최고가"), ("volume", average, "직전 20일 평균 거래량")))
 
     def _elder(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "알렉산더 엘더"
@@ -92,9 +98,12 @@ class ClassicStrategyService:
         last, previous = daily.iloc[-1], daily.iloc[-2]
         long_setup, short_setup = rising and k < 30, not rising and k > 70
         long_entry, short_entry = long_setup and last.high > previous.high, short_setup and last.low < previous.low
-        state = ("매수 진입 확인" if long_entry else "매수 관심 구간" if long_setup else "매도 진입 확인" if short_entry else
-                 "매도 관심 구간" if short_setup else "주봉 상승·일봉 대기" if rising else "주봉 하락·일봉 대기")
+        state = ("매수 조건 충족" if long_entry else "매수 관심·가격 돌파 대기" if long_setup else "매도 조건 충족" if short_entry else
+                 "매도 관심·가격 하락 대기" if short_setup else "주봉 상승·매수 조건 대기" if rising else "주봉 하락·매도 조건 대기")
         entry, label = (float(previous.high), "직전일 고가") if rising else (float(previous.low), "직전일 저가")
-        detail = f"주봉 MACD-Histogram은 {'상승' if rising else '하락'}, 일봉 Slow %K는 {k:.1f}입니다. {'매수' if rising else '매도'} 진입 기준은 {label} {entry:,.0f} 돌파입니다."
+        zone = "낮은 구간" if k < 30 else "높은 구간" if k > 70 else "중간 구간"
+        action = "넘어야 매수 조건이 확인됩니다" if rising else "아래로 내려가야 매도 조건이 확인됩니다"
+        detail = (f"주봉의 가격 힘은 {'강해지는 중' if rising else '약해지는 중'}이고, 일봉 과열·침체 지표는 "
+                  f"{k:.1f}로 {zone}입니다. 가격이 {label} {entry:,.0f}원을 {action}.")
         levels = (("price", entry, f"엘더 {label}"), ("stochastic", 30.0, "매수 관심 30"), ("stochastic", 70.0, "매도 관심 70"))
         return self._item(name, state, detail, levels=levels)
