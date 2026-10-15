@@ -102,6 +102,67 @@ class StockDriveSyncService:
             cleaned = self._acknowledge_and_cleanup(drive, metadata)
         return {"applied": applied, "already_applied": skipped, "cleaned": cleaned}
 
+    def update_local(self) -> dict[str, Any]:
+        """Apply Drive deltas and prove a second pass is idempotent."""
+        applied = self.sync_local()
+        verified = self.sync_local()
+        if verified["applied"]:
+            raise CloudArchiveError("로컬 재검증에서 새 적용 건이 발견되었습니다.")
+        return {
+            "status": "verified",
+            "applied": applied["applied"],
+            "already_applied": verified["already_applied"],
+            "cleaned": sorted(set(applied["cleaned"] + verified["cleaned"])),
+        }
+
+    def cleanup_synced(self, through: date, *, confirmed: bool = False) -> dict[str, Any]:
+        """Delete only completed deltas already acknowledged by the local database."""
+        with self._context.drive() as drive:
+            metadata = self._metadata(drive)
+            day = through.isoformat()
+            synced = str(metadata.get("local_synced_through") or "")
+            state_day = str((metadata.get("state") or {}).get("reference_date") or "")
+            if not synced or day > synced:
+                raise CloudArchiveError(
+                    f"로컬 반영이 확인되지 않은 날짜는 정리할 수 없습니다: 요청={day}, 반영={synced or '없음'}"
+                )
+            if not state_day or day > state_day:
+                raise CloudArchiveError(
+                    f"작업 상태에 포함되지 않은 날짜는 정리할 수 없습니다: 요청={day}, 상태={state_day or '없음'}"
+                )
+            if metadata.get("state_checkpoint_pending"):
+                raise CloudArchiveError("저장 중인 체크포인트가 있어 Drive 자료를 정리할 수 없습니다.")
+            replay = set(metadata.get("replay_delta_dates") or [])
+            targets = [
+                item for item in metadata.get("deltas", [])
+                if str(item["reference_date"]) <= day
+            ]
+            incomplete = [
+                str(item["reference_date"]) for item in targets
+                if self._completed_stage_for(
+                    metadata, date.fromisoformat(str(item["reference_date"]))
+                ) != "menu7" or str(item["reference_date"]) in replay
+            ]
+            if incomplete:
+                raise CloudArchiveError(
+                    "메뉴 7 완료·복구 반영이 확인되지 않은 날짜가 있습니다: "
+                    + ", ".join(sorted(set(incomplete)))
+                )
+            result = {
+                "status": "ready-to-delete" if targets else "nothing-to-delete",
+                "through": day,
+                "dates": sorted({str(item["reference_date"]) for item in targets}),
+                "file_count": len(targets),
+            }
+            if not confirmed or not targets:
+                return result
+            for item in targets:
+                drive.delete(str(item["id"]))
+            metadata["deltas"] = [item for item in metadata.get("deltas", []) if item not in targets]
+            drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+            result["status"] = "deleted"
+            return result
+
     def publish_local_base(self, target_date: date) -> dict[str, Any]:
         """Publish a validated local menu-2 base without replacing cloud state."""
         conninfo = database_conninfo()

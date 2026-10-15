@@ -167,6 +167,8 @@ class GoogleDriveClient:
         response = self._request(
             "delete", f"{DRIVE_API}/files/{file_id}", timeout=30
         )
+        if response.status_code == 404:
+            return
         self._require_success(response, "Drive 파일 삭제")
 
     def read_json(self, name: str, parent_id: str) -> dict[str, Any] | None:

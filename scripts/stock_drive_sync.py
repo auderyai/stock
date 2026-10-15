@@ -29,7 +29,13 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     sub.add_parser("bootstrap", help="로컬 DB에서 암호화된 초기 작업 상태 생성·업로드")
     sub.add_parser("sync-local", help="Drive 일일 변경분을 로컬 PostgreSQL에 멱등 반영")
+    sub.add_parser("update-local", help="Drive 변경분을 로컬에 반영하고 멱등성을 재검증")
     sub.add_parser("verify", help="비밀값 출력 없이 Drive 메타데이터 확인")
+    cleanup = sub.add_parser(
+        "cleanup-synced", help="로컬 반영·메뉴 7 완료가 확인된 Drive 델타만 정리"
+    )
+    cleanup.add_argument("--through", type=_date, required=True)
+    cleanup.add_argument("--confirm", choices=("DELETE_SYNCED_DRIVE_DELTAS",))
     local_base = sub.add_parser(
         "publish-local-base", help="검증된 로컬 메뉴 2 일일자료를 Drive에 게시"
     )
@@ -68,8 +74,15 @@ def main(argv: list[str] | None = None) -> int:
             result = service.bootstrap()
         elif args.command == "sync-local":
             result = service.sync_local()
+        elif args.command == "update-local":
+            result = service.update_local()
         elif args.command == "verify":
             result = service.verify()
+        elif args.command == "cleanup-synced":
+            result = service.cleanup_synced(
+                args.through,
+                confirmed=args.confirm == "DELETE_SYNCED_DRIVE_DELTAS",
+            )
         elif args.command == "publish-local-base":
             result = service.publish_local_base(args.date)
         elif args.command == "publish-local-progress":

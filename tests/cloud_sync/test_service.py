@@ -368,6 +368,63 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual("2026-10-01", metadata["local_synced_through"])
         self.assertEqual(["kept"], [item["id"] for item in metadata["deltas"]])
 
+    def test_manual_cleanup_deletes_only_synced_menu7_deltas(self) -> None:
+        service = StockDriveSyncService(SyncContext(
+            Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        drive = MagicMock(root_folder_id="folder")
+        drive.__enter__.return_value = drive
+        metadata = {
+            "state": {"reference_date": "2026-10-14"},
+            "local_synced_through": "2026-10-14",
+            "stage_dates": {"2026-10-13": "menu7", "2026-10-14": "menu7"},
+            "deltas": [
+                {"id": "old", "reference_date": "2026-10-13"},
+                {"id": "new", "reference_date": "2026-10-14"},
+            ],
+        }
+        with patch.object(SyncContext, "drive", return_value=drive), patch.object(
+            service, "_metadata", return_value=metadata
+        ):
+            planned = service.cleanup_synced(date(2026, 10, 13))
+            deleted = service.cleanup_synced(date(2026, 10, 13), confirmed=True)
+
+        self.assertEqual("ready-to-delete", planned["status"])
+        self.assertEqual("deleted", deleted["status"])
+        drive.delete.assert_called_once_with("old")
+        self.assertEqual(["new"], [item["id"] for item in metadata["deltas"]])
+
+    def test_manual_cleanup_rejects_unapplied_date(self) -> None:
+        service = StockDriveSyncService(SyncContext(
+            Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        drive = MagicMock()
+        drive.__enter__.return_value = drive
+        with patch.object(SyncContext, "drive", return_value=drive), patch.object(
+            service, "_metadata", return_value={
+                "state": {"reference_date": "2026-10-14"},
+                "local_synced_through": "2026-10-13",
+                "deltas": [],
+            }
+        ):
+            with self.assertRaisesRegex(CloudArchiveError, "로컬 반영"):
+                service.cleanup_synced(date(2026, 10, 14), confirmed=True)
+
+    def test_update_local_verifies_second_pass_is_idempotent(self) -> None:
+        service = StockDriveSyncService(SyncContext(
+            Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        with patch.object(service, "sync_local", side_effect=[
+            {"applied": ["batch"], "already_applied": [], "cleaned": []},
+            {"applied": [], "already_applied": ["batch"], "cleaned": []},
+        ]) as sync:
+            result = service.update_local()
+
+        self.assertEqual("verified", result["status"])
+        self.assertEqual(["batch"], result["applied"])
+        self.assertEqual(["batch"], result["already_applied"])
+        self.assertEqual(2, sync.call_count)
+
 
 if __name__ == "__main__":
     unittest.main()

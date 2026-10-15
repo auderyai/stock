@@ -49,6 +49,19 @@ class GoogleDriveClientTests(unittest.TestCase):
 
         session.delete.assert_called_once()
 
+    def test_delete_is_idempotent_when_file_is_missing(self) -> None:
+        session = MagicMock()
+        token = MagicMock(ok=True, status_code=200)
+        token.json.return_value = {"access_token": "token"}
+        session.post.return_value = token
+        session.delete.return_value = MagicMock(ok=False, status_code=404)
+        client = GoogleDriveClient(
+            client_id="id", client_secret="secret", refresh_token="refresh",
+            root_folder_id="folder", session=session,
+        )
+
+        client.delete("missing")
+
 
 if __name__ == "__main__":
     unittest.main()
