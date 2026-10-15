@@ -96,14 +96,13 @@ class DatabaseArchiveService:
         output: Path,
         *,
         pg_dump: Path,
-        reference_date: date | None = None,
+        reference_date: date,
         git_commit: str = "unknown",
     ) -> ArchiveResult:
-        selected = reference_date or self._latest_market_date()
         return self._export(
             output,
             kind="worker-state",
-            reference_date=selected,
+            reference_date=reference_date,
             pg_dump=pg_dump,
             git_commit=git_commit,
         )
@@ -330,14 +329,6 @@ class DatabaseArchiveService:
         target = schema.with_name("schema-compatible.sql")
         target.write_text("".join(compatible), encoding="utf-8")
         return target
-
-    def _latest_market_date(self) -> date:
-        row = self._conn.execute(
-            "SELECT max(trade_date::date) AS latest FROM market.ohlcv_daily"
-        ).fetchone()
-        if not row or row["latest"] is None:
-            raise CloudArchiveError("작업 상태 기준 거래일을 찾지 못했습니다.")
-        return row["latest"]
 
     def _parameters(self) -> dict[str, str]:
         parameters = dict(self._conn.info.get_parameters())

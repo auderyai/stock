@@ -36,9 +36,6 @@ def parser() -> argparse.ArgumentParser:
     )
     cleanup.add_argument("--through", type=_date, required=True)
     cleanup.add_argument("--confirm", choices=("DELETE_SYNCED_DRIVE_DELTAS",))
-    reset = sub.add_parser("reset-menu57-cloud", help="Drive를 메뉴 5·7 전용 상태로 재구성")
-    reset.add_argument("--through", type=_date, required=True)
-    reset.add_argument("--confirm", choices=("DELETE_MENU2_CLOUD_DATA",))
     cloud = sub.add_parser("cloud-run", help="GitHub Actions 메뉴 5·7 실행")
     cloud.add_argument("--date", type=_date)
     cloud.add_argument(
@@ -77,11 +74,6 @@ def main(argv: list[str] | None = None) -> int:
             result = service.cleanup_synced(
                 args.through,
                 confirmed=args.confirm == "DELETE_SYNCED_DRIVE_DELTAS",
-            )
-        elif args.command == "reset-menu57-cloud":
-            result = service.reset_menu57_cloud(
-                args.through,
-                confirmed=args.confirm == "DELETE_MENU2_CLOUD_DATA",
             )
         else:
             target = args.date or datetime.now(ZoneInfo("Asia/Seoul")).date()

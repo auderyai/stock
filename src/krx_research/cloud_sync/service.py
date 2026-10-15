@@ -64,6 +64,7 @@ class StockDriveSyncService:
             result = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
                 archive,
                 pg_dump=self._executable("pg_dump"),
+                reference_date=self._latest_cloud_date(conn),
                 git_commit=self._git_commit(),
             )
             encrypted = work / "worker-state-a.enc"
@@ -162,82 +163,6 @@ class StockDriveSyncService:
             drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
             result["status"] = "deleted"
             return result
-
-    def reset_menu57_cloud(self, through: date, *, confirmed: bool = False) -> dict[str, Any]:
-        """Replace mixed cloud state with a verified menu-5/7-only snapshot."""
-        if not confirmed:
-            return {"status": "confirmation-required", "through": through.isoformat()}
-        conninfo = database_conninfo()
-        with self._context.drive() as drive, tempfile.TemporaryDirectory(
-            prefix="stock-menu57-reset-"
-        ) as name, self._connection(conninfo) as conn:
-            old = self._metadata(drive)
-            if old.get("state_checkpoint_pending"):
-                raise CloudArchiveError("저장 중인 체크포인트가 있어 클라우드 상태를 교체할 수 없습니다.")
-            with conn.transaction():
-                conn.execute(
-                    """CREATE TABLE IF NOT EXISTS market_core.cloud_stock_universe (
-                       stock_code varchar(6) PRIMARY KEY, stock_name text NOT NULL,
-                       updated_at timestamptz NOT NULL DEFAULT now())"""
-                )
-                conn.execute("DELETE FROM market_core.cloud_stock_universe")
-                conn.execute(
-                    """INSERT INTO market_core.cloud_stock_universe(stock_code,stock_name)
-                       SELECT c.stock_code,COALESCE(s.stock_name,c.stock_code)
-                       FROM market_core.ls_investor_t1702_checkpoint c
-                       LEFT JOIN market_core.ls_security_master s USING(stock_code)
-                       WHERE c.trade_date=%s AND c.exchange_code='K'""",
-                    (through,),
-                )
-            counts = conn.execute(
-                """SELECT
-                   (SELECT count(*) FROM market_core.cloud_stock_universe) AS targets,
-                   (SELECT count(*) FROM market_core.venue_ohlcv_daily
-                    WHERE trade_date=%s AND venue='COMBINED') AS combined""",
-                (through,),
-            ).fetchone()
-            if not counts or not counts["targets"] or counts["targets"] != counts["combined"]:
-                raise CloudArchiveError(
-                    f"메뉴 5·7 로컬 검증 실패: 대상={counts and counts['targets']}, "
-                    f"COMBINED={counts and counts['combined']}"
-                )
-
-            work = Path(name)
-            archive = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
-                work / "menu57-state.tar.gz",
-                pg_dump=self._executable("pg_dump"),
-                reference_date=through,
-                git_commit=self._git_commit(),
-            )
-            encrypted = work / "menu57-state.enc"
-            ArchiveCipher.encrypt(archive.path, encrypted, self._context.credentials.archive_key)
-            state_folder = drive.ensure_folder("worker-state")
-            delta_folder = drive.ensure_folder("daily-deltas")
-            previous_ids = {
-                str(item["id"]) for folder in (state_folder, delta_folder)
-                for item in drive.list_folder(folder)
-            }
-            file_id = drive.upload(encrypted, name=encrypted.name, parent_id=state_folder)
-            metadata = {
-                "format_version": 1,
-                "state": self._state_record(file_id, encrypted.name, encrypted, archive.manifest),
-                "state_slot": "menu57",
-                "delta_folder_id": delta_folder,
-                "deltas": [],
-                "completed_stage": "menu7",
-                "stage_dates": {through.isoformat(): "menu7"},
-                "local_synced_through": through.isoformat(),
-            }
-            drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
-            for old_id in previous_ids - {str(file_id)}:
-                drive.delete(old_id)
-            return {
-                "status": "reset-menu57-only",
-                "reference_date": through.isoformat(),
-                "targets": counts["targets"],
-                "combined": counts["combined"],
-                "deleted_files": len(previous_ids - {str(file_id)}),
-            }
 
     def cloud_run(self, target_date: date, *, stage: str = "menu5") -> dict[str, Any]:
         if stage not in {"menu5", "menu7"}:
@@ -706,6 +631,19 @@ class StockDriveSyncService:
             (target_date,),
         ).fetchone()
         return bool(row and row["targets"] and row["targets"] == row["completed"])
+
+    @staticmethod
+    def _latest_cloud_date(conn) -> date:
+        row = conn.execute(
+            """SELECT max(trade_date) AS latest
+               FROM market_core.ls_investor_t1702_checkpoint c
+               WHERE EXISTS (
+                   SELECT 1 FROM market_core.venue_ohlcv_daily v
+                   WHERE v.trade_date=c.trade_date AND v.venue='COMBINED')"""
+        ).fetchone()
+        if not row or row["latest"] is None:
+            raise CloudArchiveError("메뉴 5·7 완료 기준일을 찾지 못했습니다.")
+        return row["latest"]
 
     @staticmethod
     def _executable(name: str) -> Path:
