@@ -9,7 +9,7 @@ on:
         default: ""
         type: string
       stage:
-        description: "독립 실행 단계"
+        description: "클라우드 실행 단계(menu5 또는 menu7)"
         required: true
         type: string
 
@@ -60,7 +60,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          args=(--stage "${{ inputs.stage }}")
+          stage="${{ inputs.stage }}"
+          if [[ "$stage" != "menu5" && "$stage" != "menu7" ]]; then
+            echo "::error::지원하지 않는 클라우드 단계: $stage"
+            exit 64
+          fi
+          args=(--stage "$stage")
           if [[ -n "${{ inputs.target_date }}" ]]; then
             args+=(--date "${{ inputs.target_date }}")
           fi
@@ -79,9 +84,4 @@ jobs:
           fi
           if [[ $code -ne 0 ]]; then
             exit "$code"
-          fi
-          if grep -q '"status": "provider-failed"' <<<"$output"; then
-            gh issue create --repo "$GITHUB_REPOSITORY" \
-              --title "Stock Drive 공급원 오류: ${{ inputs.target_date || 'KST today' }}" \
-              --body "가격 공급원 호출이 정해진 2회 모두 실패했습니다. 완료 데이터와 체크포인트는 보존했고 메뉴 5·7은 계속 실행합니다. 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
