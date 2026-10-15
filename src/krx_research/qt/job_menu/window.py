@@ -76,6 +76,19 @@ class RangeDialog(QDialog):
                           venues=venues, include_investor=self.investor.isChecked())
 
 
+class DateDialog(QDialog):
+    def __init__(self, title: str, label: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.date = QDateEdit(QDate.currentDate(), calendarPopup=True)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        form = QFormLayout(self); form.addRow(label, self.date); form.addRow(buttons)
+
+    def value(self) -> dt.date:
+        return self.date.date().toPython()
+
+
 class KrxJobMenuWindow(QMainWindow):
     def __init__(self, project_root: Path) -> None:
         super().__init__()
@@ -93,7 +106,9 @@ class KrxJobMenuWindow(QMainWindow):
         title = QLabel("KRX 작업 메뉴")
         font = title.font(); font.setPointSize(16); font.setBold(True); title.setFont(font)
         layout.addWidget(title)
-        layout.addWidget(QLabel("메뉴 2는 기존 경로, 메뉴 5·7은 LS OPEN API 우선·Xing fallback 경로를 사용합니다."))
+        layout.addWidget(QLabel(
+            "메뉴 2는 로컬 갱신, 메뉴 5·7은 LS 수집, 메뉴 8·9·10은 Google Drive 검증·반영·정리입니다."
+        ))
         self.list = QListWidget()
         for job in self._jobs:
             item = QListWidgetItem(f"{job.number}. {job.title}")
@@ -144,15 +159,25 @@ class KrxJobMenuWindow(QMainWindow):
                 return
             self._controller.run_legacy(job.legacy)
             return
-        if job.number == 2:
-            date = QDateEdit(QDate.currentDate(), calendarPopup=True)
-            dialog = QDialog(self); dialog.setWindowTitle("메뉴 2 기준일")
-            form = QFormLayout(dialog); form.addRow("기준일", date)
-            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-            buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); form.addRow(buttons)
+        if job.number in {8, 9}:
+            self._controller.run(JobRequest(JobKind(job.number)))
+            return
+        if job.number in {2, 10}:
+            cleanup = job.number == 10
+            dialog = DateDialog(
+                job.title, "정리 기준일" if cleanup else "기준일", self
+            )
             if dialog.exec() != QDialog.Accepted:
                 return
-            self._controller.run(JobRequest(JobKind.MENU_2, end=date.date().toPython()))
+            if cleanup and QMessageBox.warning(
+                self,
+                "Drive 자료 정리 확인",
+                "로컬 반영과 메뉴 7 완료가 검증된 날짜까지만 Drive 자료를 삭제합니다. 계속하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            ) != QMessageBox.Yes:
+                return
+            self._controller.run(JobRequest(JobKind(job.number), end=dialog.value()))
             return
         range_dialog = RangeDialog(job.title, menu=job.number, parent=self)
         if range_dialog.exec() == QDialog.Accepted:
@@ -190,6 +215,12 @@ class KrxJobMenuWindow(QMainWindow):
                              "t1702는 LS OPEN API 우선, 실패 요청만 Xing fallback으로 PostgreSQL에 저장합니다.", True)
         by_number[7] = UiJob(7, "LS 종목별 일봉·수급 원본 보완",
                              "t8451/t1702는 LS OPEN API 우선·Xing fallback으로 PostgreSQL 누락분만 보완합니다.", True)
+        by_number[8] = UiJob(8, "Google Drive 작업 상태 확인",
+                             "비밀값을 출력하지 않고 Drive 상태·체크포인트·암호화 자료 무결성을 검증합니다.", True)
+        by_number[9] = UiJob(9, "Google Drive 자료 로컬 반영",
+                             "Drive 변경분을 PostgreSQL에 멱등 반영하고 재실행하여 already_applied를 검증합니다.", True)
+        by_number[10] = UiJob(10, "반영 완료 Google Drive 자료 정리",
+                              "로컬 반영과 메뉴 7 완료가 검증된 기준일까지 파일과 메타데이터를 함께 정리합니다.", True)
         if 1 not in by_number:
             by_number[1] = UiJob(1, "KRX 워크스테이션 GUI 실행",
                                  "종목 검색, 차트 및 분석 화면을 실행합니다.", False,

@@ -6,11 +6,11 @@ from .models import JobKind, JobRequest, JobResult, LegacyJobSpec
 from .ports import JobExecutorPort, Progress
 
 
-class Menu257ApplicationService:
+class JobMenuApplicationService:
     """Application facade used by the PySide6 job menu.
 
     The GUI never talks to subprocess, PostgreSQL, DLL, or Xing directly.
-    Validated production scripts remain composition roots for menu 2/5/7,
+    Validated production scripts remain composition roots for every menu item,
     and those scripts instantiate the already-qualified XingDbMenuService.
     """
 
@@ -29,6 +29,12 @@ class Menu257ApplicationService:
 
     @staticmethod
     def _validate(request: JobRequest) -> None:
+        if request.kind in {JobKind.DRIVE_VERIFY, JobKind.DRIVE_UPDATE}:
+            return
+        if request.kind == JobKind.DRIVE_CLEANUP:
+            if request.end is None:
+                raise ValueError("Drive 정리 기준일이 필요합니다.")
+            return
         if request.kind == JobKind.MENU_2:
             if request.end is None:
                 raise ValueError("메뉴 2 기준일이 필요합니다.")
@@ -43,3 +49,7 @@ class Menu257ApplicationService:
             allowed = {"NXT", "COMBINED"}
             if not request.venues or any(v not in allowed for v in request.venues):
                 raise ValueError("메뉴 7 거래시장은 NXT/COMBINED 중 하나 이상이어야 합니다.")
+
+
+# 기존 호출부와 외부 실행 파일의 호환성을 유지한다.
+Menu257ApplicationService = JobMenuApplicationService

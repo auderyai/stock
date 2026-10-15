@@ -9,6 +9,9 @@ class JobKind(IntEnum):
     MENU_2 = 2
     MENU_5 = 5
     MENU_7 = 7
+    DRIVE_VERIFY = 8
+    DRIVE_UPDATE = 9
+    DRIVE_CLEANUP = 10
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Signal, Slot
 
 from krx_research.application.job_menu.models import JobRequest, LegacyJobSpec
-from krx_research.application.job_menu.service import Menu257ApplicationService
+from krx_research.application.job_menu.service import JobMenuApplicationService
 
 
 class JobWorker(QObject):
@@ -12,7 +12,7 @@ class JobWorker(QObject):
     failed = Signal(str)
     finished = Signal()
 
-    def __init__(self, service: Menu257ApplicationService,
+    def __init__(self, service: JobMenuApplicationService,
                  request: JobRequest | None = None,
                  legacy: LegacyJobSpec | None = None) -> None:
         super().__init__()

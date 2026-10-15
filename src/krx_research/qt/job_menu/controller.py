@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Signal
 
 from krx_research.application.job_menu.models import JobRequest, LegacyJobSpec
-from krx_research.application.job_menu.service import Menu257ApplicationService
+from krx_research.application.job_menu.service import JobMenuApplicationService
 from krx_research.infrastructure.job_menu import PythonJobExecutor
 from .worker import JobWorker
 
@@ -20,7 +20,7 @@ class JobMenuController(QObject):
     def __init__(self, project_root: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._executor = PythonJobExecutor(project_root)
-        self._service = Menu257ApplicationService(self._executor)
+        self._service = JobMenuApplicationService(self._executor)
         self._thread: QThread | None = None
         self._worker: JobWorker | None = None
 

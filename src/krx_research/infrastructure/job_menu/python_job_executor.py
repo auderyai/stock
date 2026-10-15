@@ -51,6 +51,17 @@ class PythonJobExecutor:
     def _build_command(self, request: JobRequest) -> list[str]:
         if not self._python.is_file():
             raise FileNotFoundError(f"가상환경 Python을 찾을 수 없습니다: {self._python}")
+        drive_script = self._root / "scripts" / "stock_drive_sync.py"
+        if request.kind == JobKind.DRIVE_VERIFY:
+            return [str(self._python), str(drive_script), "verify"]
+        if request.kind == JobKind.DRIVE_UPDATE:
+            return [str(self._python), str(drive_script), "update-local"]
+        if request.kind == JobKind.DRIVE_CLEANUP:
+            return [
+                str(self._python), str(drive_script), "cleanup-synced",
+                "--through", request.end.isoformat(),
+                "--confirm", "DELETE_SYNCED_DRIVE_DELTAS",
+            ]
         if request.kind == JobKind.MENU_2:
             script = self._root / "scripts" / "run_daily_pipeline.py"
             return [
