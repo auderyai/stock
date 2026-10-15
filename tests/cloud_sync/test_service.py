@@ -127,8 +127,13 @@ class CloudSyncServiceTests(unittest.TestCase):
     def test_later_stage_rejects_older_reference_date(self) -> None:
         with self.assertRaisesRegex(CloudArchiveError, "기준일이 준비되지 않았습니다"):
             StockDriveSyncService._require_stage_base(
-                date(2026, 10, 12), date(2026, 10, 13), "menu5"
+                False, date(2026, 10, 13), "menu5"
             )
+
+    def test_historical_stage_accepts_existing_market_base(self) -> None:
+        StockDriveSyncService._require_stage_base(
+            True, date(2026, 10, 13), "menu5"
+        )
 
     def test_completed_menu_is_not_run_again(self) -> None:
         self.assertTrue(StockDriveSyncService._stage_completed("menu5", "menu5"))
@@ -214,6 +219,8 @@ class CloudSyncServiceTests(unittest.TestCase):
             service, "_apply_cloud_deltas"
         ), patch.object(
             service, "_latest_date", return_value=target
+        ), patch.object(
+            service, "_market_date_exists", return_value=True
         ), patch.object(
             service, "_menu5_complete", return_value=False
         ), patch.object(

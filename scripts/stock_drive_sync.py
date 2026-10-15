@@ -34,6 +34,10 @@ def parser() -> argparse.ArgumentParser:
         "publish-local-base", help="검증된 로컬 메뉴 2 일일자료를 Drive에 게시"
     )
     local_base.add_argument("--date", type=_date, required=True)
+    local_progress = sub.add_parser(
+        "publish-local-progress", help="검증된 로컬 일일 진행자료를 Drive 복구점으로 게시"
+    )
+    local_progress.add_argument("--date", type=_date, required=True)
     cloud = sub.add_parser("cloud-run", help="GitHub Actions 메뉴 2·5·7 실행")
     cloud.add_argument("--date", type=_date)
     cloud.add_argument(
@@ -68,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
             result = service.verify()
         elif args.command == "publish-local-base":
             result = service.publish_local_base(args.date)
+        elif args.command == "publish-local-progress":
+            result = service.publish_local_progress(args.date)
         else:
             target = args.date or datetime.now(ZoneInfo("Asia/Seoul")).date()
             result = service.cloud_run(target, stage=args.stage)

@@ -164,6 +164,56 @@ class StockDriveSyncService:
                 "market_rows": market_rows,
             }
 
+    def publish_local_progress(self, target_date: date) -> dict[str, Any]:
+        """Seed a historical cloud retry with verified local rows without claiming completion."""
+        conninfo = database_conninfo()
+        day = target_date.isoformat()
+        with self._context.drive() as drive, tempfile.TemporaryDirectory(
+            prefix="stock-progress-"
+        ) as name, self._connection(conninfo) as conn:
+            metadata = self._metadata(drive)
+            work = Path(name)
+            delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
+                work / f"delta-{day}.tar.gz",
+                target_date=target_date,
+                git_commit=self._git_commit(),
+            )
+            market_rows = next((
+                int(item["rows"]) for item in delta.manifest["tables"]
+                if item["relation"] == "market.ohlcv_daily"
+            ), 0)
+            if market_rows <= 0:
+                raise CloudArchiveError(f"로컬 기준자료가 0건입니다: {day}")
+
+            encrypted = work / f"delta-{day}-local-progress.enc"
+            ArchiveCipher.encrypt(delta.path, encrypted, self._context.credentials.archive_key)
+            file_id = drive.upload(
+                encrypted, name=encrypted.name,
+                parent_id=str(metadata["delta_folder_id"]),
+            )
+            record = self._delta_record(file_id, encrypted.name, encrypted, delta.manifest)
+            record["completed_stage"] = "menu2"
+            metadata["deltas"] = sorted(
+                [item for item in metadata.get("deltas", [])
+                 if item.get("reference_date") != day] + [record],
+                key=lambda item: item["reference_date"],
+            )[-400:]
+            stages = dict(metadata.get("stage_dates") or {})
+            stages[day] = "menu2"
+            metadata["stage_dates"] = stages
+            replay = set(metadata.get("replay_delta_dates") or [])
+            replay.add(day)
+            metadata["replay_delta_dates"] = sorted(replay)
+            if metadata.get("menu5_reference_date") == day:
+                metadata.pop("menu5_reference_date", None)
+                metadata.pop("menu5_next_offset", None)
+            drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+            return {
+                "status": "updated", "reference_date": day,
+                "completed_stage": "menu2", "market_rows": market_rows,
+                "delta_rows": self._rows(delta.manifest),
+            }
+
     def cloud_run(self, target_date: date, *, stage: str = "menu2") -> dict[str, Any]:
         if stage not in {"menu2", "menu5", "menu7", "remaining", "all"}:
             raise ValueError(f"지원하지 않는 클라우드 단계입니다: {stage}")
@@ -182,6 +232,7 @@ class StockDriveSyncService:
                 archive_service.restore_snapshot(state_archive, psql=self._executable("psql"))
                 self._apply_cloud_deltas(drive, metadata, work, conn)
                 before = self._latest_date(conn)
+                target_ready = self._market_date_exists(conn, target_date)
                 menu5_complete = self._menu5_complete(conn, target_date)
 
             commit = self._git_commit()
@@ -215,7 +266,7 @@ class StockDriveSyncService:
                         "checkpoints": checkpoints,
                     }
 
-            self._require_stage_base(actual, target_date, stage)
+            self._require_stage_base(target_ready, target_date, stage)
             day = target_date.isoformat()
 
             if stage in {"menu5", "remaining", "all"} and (
@@ -435,13 +486,14 @@ class StockDriveSyncService:
         delta_record["completed_stage"] = "menu5-partial"
         delta_record["menu5_next_offset"] = next_offset
         deltas.append(delta_record)
-        stage = self._record_stage(metadata, reference_date, "menu5-partial")
+        self._record_stage(metadata, reference_date, "menu5-partial")
+        state_day = date.fromisoformat(str(metadata["state"]["reference_date"]))
         metadata.update(
             {
                 "deltas": sorted(
                     deltas, key=lambda item: item["reference_date"]
                 )[-400:],
-                "completed_stage": stage,
+                "completed_stage": self._completed_stage_for(metadata, state_day),
                 "state_checkpoint_pending": "menu5-partial",
                 "menu5_next_offset": next_offset,
                 "menu5_reference_date": day,
@@ -498,12 +550,13 @@ class StockDriveSyncService:
         delta_record["completed_stage"] = stage
         deltas.append(delta_record)
         completed_stage = self._record_stage(metadata, reference_date, stage)
+        state_day = state_reference_date or reference_date
         metadata.update(
             {
                 "deltas": sorted(
                     deltas, key=lambda item: item["reference_date"]
                 )[-400:],
-                "completed_stage": completed_stage,
+                "completed_stage": self._completed_stage_for(metadata, state_day),
                 "state_checkpoint_pending": completed_stage,
             }
         )
@@ -532,6 +585,12 @@ class StockDriveSyncService:
                 "state_slot": next_slot,
             }
         )
+        replay = set(metadata.get("replay_delta_dates") or [])
+        replay.discard(day)
+        if replay:
+            metadata["replay_delta_dates"] = sorted(replay)
+        else:
+            metadata.pop("replay_delta_dates", None)
         metadata.pop("state_checkpoint_pending", None)
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
         return metadata, {
@@ -549,13 +608,15 @@ class StockDriveSyncService:
     ) -> None:
         """Rebuild state when a delta was saved before a state checkpoint failed."""
         state_reference = date.fromisoformat(str(metadata["state"]["reference_date"]))
+        replay = set(metadata.get("replay_delta_dates") or [])
         delta_dir = work / "restore-deltas"
         delta_dir.mkdir(parents=True, exist_ok=True)
         applier = DeltaArchiveApplier(conn)
         for record in sorted(
             metadata.get("deltas", []), key=lambda item: item["reference_date"]
         ):
-            if date.fromisoformat(str(record["reference_date"])) < state_reference:
+            record_day = str(record["reference_date"])
+            if date.fromisoformat(record_day) < state_reference and record_day not in replay:
                 continue
             encrypted = drive.download(
                 str(record["id"]), delta_dir / str(record["name"])
@@ -608,10 +669,13 @@ class StockDriveSyncService:
 
     @classmethod
     def _require_stage_base(
-        cls, actual: date | None, target_date: date, stage: str
+        cls, target_ready: bool, target_date: date, stage: str
     ) -> None:
         """Require the requested trading-day base before later-stage collection."""
-        cls._require_reference_date(actual, target_date, stage)
+        if not target_ready:
+            raise CloudArchiveError(
+                f"{stage} 실행 전 메뉴 2 기준일이 준비되지 않았습니다: 요청={target_date}"
+            )
 
     @classmethod
     def _completed_stage_for(
@@ -729,6 +793,14 @@ class StockDriveSyncService:
             (target_date, target_date),
         ).fetchone()
         return bool(row and row["targets"] and row["targets"] == row["completed"])
+
+    @staticmethod
+    def _market_date_exists(conn, target_date: date) -> bool:
+        row = conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM market.ohlcv_daily WHERE trade_date::date=%s) AS found",
+            (target_date,),
+        ).fetchone()
+        return bool(row and row["found"])
 
     @staticmethod
     def _executable(name: str) -> Path:
