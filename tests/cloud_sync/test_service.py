@@ -228,6 +228,38 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual("menu5", result["completed_stage"])
         self.assertEqual(7, result["delta_rows"])
 
+    def test_local_base_rejects_zero_market_rows_before_upload(self) -> None:
+        target = date(2026, 10, 14)
+        root = Path.cwd()
+        service = StockDriveSyncService(SyncContext(
+            root, DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        drive = MagicMock(root_folder_id="folder")
+        drive.__enter__.return_value = drive
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        archive = MagicMock(
+            path=root / "empty.tar.gz",
+            manifest={"tables": [{"relation": "market.ohlcv_daily", "rows": 0}]},
+        )
+        metadata = {
+            "state": {"reference_date": "2026-10-12"},
+            "delta_folder_id": "deltas",
+        }
+
+        with patch.object(SyncContext, "drive", return_value=drive), patch.object(
+            service, "_metadata", return_value=metadata
+        ), patch.object(
+            service, "_connection", return_value=connection
+        ), patch(
+            "krx_research.cloud_sync.service.DatabaseArchiveService"
+        ) as archive_service:
+            archive_service.return_value.export_delta.return_value = archive
+            with self.assertRaisesRegex(CloudArchiveError, "0건"):
+                service.publish_local_base(target)
+
+        drive.upload.assert_not_called()
+
     def test_failed_menu5_batch_is_saved_without_advancing_offset(self) -> None:
         root = Path.cwd()
         credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")

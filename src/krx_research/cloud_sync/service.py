@@ -102,6 +102,68 @@ class StockDriveSyncService:
             cleaned = self._acknowledge_and_cleanup(drive, metadata)
         return {"applied": applied, "already_applied": skipped, "cleaned": cleaned}
 
+    def publish_local_base(self, target_date: date) -> dict[str, Any]:
+        """Publish a validated local menu-2 base without replacing cloud state."""
+        conninfo = database_conninfo()
+        with self._context.drive() as drive, tempfile.TemporaryDirectory(
+            prefix="stock-base-"
+        ) as name, self._connection(conninfo) as conn:
+            metadata = self._metadata(drive)
+            state_date = date.fromisoformat(str(metadata["state"]["reference_date"]))
+            if target_date < state_date:
+                raise CloudArchiveError(
+                    f"클라우드 상태보다 과거 기준일은 게시할 수 없습니다: "
+                    f"요청={target_date}, 상태={state_date}"
+                )
+            completed = self._completed_stage_for(metadata, target_date)
+            if self._stage_completed(completed, "menu2"):
+                return {"status": "already-complete", "reference_date": target_date.isoformat()}
+
+            work = Path(name)
+            delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
+                work / f"delta-{target_date}.tar.gz",
+                target_date=target_date,
+                git_commit=self._git_commit(),
+            )
+            market_rows = next(
+                (
+                    int(item["rows"])
+                    for item in delta.manifest["tables"]
+                    if item["relation"] == "market.ohlcv_daily"
+                ),
+                0,
+            )
+            if market_rows <= 0:
+                raise CloudArchiveError(
+                    f"로컬 메뉴 2 기준자료가 0건입니다: {target_date}"
+                )
+
+            encrypted = work / f"delta-{target_date}-menu2-local.enc"
+            ArchiveCipher.encrypt(delta.path, encrypted, self._context.credentials.archive_key)
+            file_id = drive.upload(
+                encrypted, name=encrypted.name, parent_id=str(metadata["delta_folder_id"])
+            )
+            record = self._delta_record(file_id, encrypted.name, encrypted, delta.manifest)
+            record["completed_stage"] = "menu2"
+            metadata["deltas"] = sorted(
+                [
+                    item for item in metadata.get("deltas", [])
+                    if item.get("reference_date") != target_date.isoformat()
+                ] + [record],
+                key=lambda item: item["reference_date"],
+            )[-400:]
+            metadata["completed_stage"] = self._record_stage(
+                metadata, target_date, "menu2"
+            )
+            metadata["state_checkpoint_pending"] = "menu2"
+            drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+            return {
+                "status": "updated",
+                "reference_date": target_date.isoformat(),
+                "completed_stage": "menu2",
+                "market_rows": market_rows,
+            }
+
     def cloud_run(self, target_date: date, *, stage: str = "menu2") -> dict[str, Any]:
         if stage not in {"menu2", "menu5", "menu7", "remaining", "all"}:
             raise ValueError(f"지원하지 않는 클라우드 단계입니다: {stage}")
