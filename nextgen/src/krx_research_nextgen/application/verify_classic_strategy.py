@@ -16,6 +16,14 @@ def main() -> None:
     service = ClassicStrategyService()
     assert service._impulse([(0, 10, "L"), (1, 20, "H"), (2, 15, "L"), (3, 35, "H"), (4, 25, "L"), (5, 40, "H")]) == "상승"
     assert service._impulse([(0, 10, "L"), (1, 20, "H"), (2, 9, "L"), (3, 35, "H"), (4, 25, "L"), (5, 40, "H")]) is None
+    down = list(zip(pd.bdate_range("2026-05-27", periods=6),
+                    (2545, 1714, 2075, 1423, 1710, 1415), "HLHLHL", strict=True))
+    assert service._impulse(down) == "하락"
+    assert service._elliott_state("하락") == "하락 조정 A파 또는 C파 후보·상위 구조 미확정"
+    down_detail = service._elliott_detail(down, "하락")
+    assert all(text in down_detail for text in ("1파 831원", "3파 652원", "5파 295원",
+                                                 "A-B-C 조정 관점", "A파는 첫 하락", "B파는 반등",
+                                                 "C파는 두 번째 하락", "상위 파동 역할: 미확정"))
     assert service.assess(frame(252))[1].state == "자료부족"
     data = frame(253); data.iloc[-1] = [240, 300, 235, 250, 2_000]
     results = service.assess(data)
@@ -25,7 +33,7 @@ def main() -> None:
     assert {level[0] for level in results[2].levels} == {"price", "stochastic"}
     explanations = "\n".join(result.text() for result in results)
     assert "현재 판단:" in explanations
-    assert ("조건 점검:" in results[0].detail or "검사 내용:" in results[0].detail)
+    assert ("2파 규칙:" in results[0].detail or "검사 범위:" in results[0].detail)
     assert "가격 조건:" in results[1].detail and "주봉 방향:" in results[2].detail
     assert "+" not in explanations
     for timeframe in ("D", "W", "M", "Q", "Y"):

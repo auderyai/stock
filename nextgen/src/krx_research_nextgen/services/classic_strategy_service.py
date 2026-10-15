@@ -58,24 +58,66 @@ class ClassicStrategyService:
             return "하락" if p0 > p1 and p2 > p3 and p4 > p5 and p2 < p0 and p4 < p1 and p2 - p3 >= min(p0 - p1, p4 - p5) else None
         return None
 
+    @staticmethod
+    def _elliott_detail(points, direction: str) -> str:
+        prices = [point[1] for point in points]
+        p0, p1, p2, p3, p4, p5 = prices
+        lengths = {1: abs(p1 - p0), 3: abs(p3 - p2), 5: abs(p5 - p4)}
+        retrace2 = abs(p2 - p1) / lengths[1] * 100
+        retrace4 = abs(p4 - p3) / lengths[3] * 100
+        wave2_margin = p2 - p0 if direction == "상승" else p0 - p2
+        overlap_margin = p4 - p1 if direction == "상승" else p1 - p4
+        fifth_margin = p5 - p3 if direction == "상승" else p3 - p5
+        turns = " → ".join(
+            f"{'시작' if index == 0 else f'{index}파 끝'} {date:%Y-%m-%d} {price:,.0f}원"
+            for index, (date, price, _) in enumerate(points)
+        )
+        roles = ("상위 상승 추세의 동인파 또는 상위 하락 추세 조정의 A파나 C파에 해당할 수 있습니다." if direction == "상승" else
+                 "현재 구간은 A파 또는 C파 내부 후보입니다. A파라면 이후 B파 반등과 C파 하락이 남아 있고, "
+                 "C파라면 앞선 A파와 B파를 추가로 확인해야 합니다.")
+        abc = ("" if direction == "상승" else
+               "A-B-C 조정 관점: A파는 첫 하락, B파는 반등, C파는 두 번째 하락입니다. "
+               "A파와 C파는 내부적으로 작은 동인 구조를 가질 수 있습니다.\n")
+        layout_title = "파동 배치" if direction == "상승" else "A/C 내부 소파동 배치"
+        fifth_title = "5파 위치" if direction == "상승" else "내부 마지막 소파동 위치"
+        conclusion = ("세 가지 필수 가격 규칙을 통과한 상승 동인 5파 후보일 뿐, 완성파·반전·향후 방향을 확정하지 않습니다." if direction == "상승" else
+                      "A파 또는 C파 내부 구조의 기본 가격 규칙을 통과한 후보일 뿐, A-B-C 위치·조정 완료·반전을 확정하지 않습니다.")
+        fifth = (f"3파 끝을 {abs(fifth_margin):,.0f}원 넘어 새 극값 형성" if fifth_margin > 0 else
+                 f"3파 끝을 넘지 못한 절단 5파 가능성({abs(fifth_margin):,.0f}원 차이)")
+        return (f"확인 구간: {points[0][0]:%Y-%m-%d} ~ {points[-1][0]:%Y-%m-%d}\n"
+                f"{layout_title}: {turns}\n"
+                f"① 2파 규칙: 1파 시작점을 넘지 않음, 여유 {wave2_margin:,.0f}원 → 통과\n"
+                f"② 3파 규칙: 1파 {lengths[1]:,.0f}원, 3파 {lengths[3]:,.0f}원, "
+                f"5파 {lengths[5]:,.0f}원; 가장 짧은 파동은 {min(lengths, key=lengths.get)}파 → 통과\n"
+                f"③ 4파 규칙: 1파 가격 영역과 겹치지 않음, 여유 {overlap_margin:,.0f}원 → 통과\n"
+                f"④ 되돌림 참고값: 2파는 1파의 {retrace2:.1f}%, 4파는 3파의 {retrace4:.1f}%\n"
+                f"⑤ {fifth_title}: {fifth}\n"
+                f"{abc}"
+                f"상위 파동 역할: 미확정. {roles}\n"
+                "아직 확인하지 못한 항목: 1·3·5파 내부의 5개 세부파동, 2·4파 내부의 3개 세부파동, "
+                "파동 차수, 조정 형태와 대안 파동 수.\n"
+                f"최종 해석: {conclusion}")
+
+    @staticmethod
+    def _elliott_state(direction: str) -> str:
+        return ("하락 조정 A파 또는 C파 후보·상위 구조 미확정" if direction == "하락" else
+                "상승 동인 5파 후보·상위 차수 미확정")
+
     def _elliott(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "엘리어트 파동"; swings = self._swings(daily)
         for end in range(len(swings), 5, -1):
             points, direction = swings[end - 6:end], self._impulse(swings[end - 6:end])
             if direction:
-                labels = tuple((date, price, str(index)) for index, (date, price, _) in enumerate(points))
-                turns = " → ".join(f"{date:%Y-%m-%d} {price:,.0f}원" for date, price, _ in points)
-                detail = (f"확인 구간: {points[0][0]:%Y-%m-%d} ~ {points[-1][0]:%Y-%m-%d}\n"
-                          f"확인된 전환점 6개: {turns}\n"
-                          "조건 점검: ① 2파가 1파 시작점을 넘지 않음: 통과  ② 3파가 가장 짧지 않음: 통과  "
-                          "③ 4파가 1파 가격 구간과 겹치지 않음: 통과\n"
-                          f"해석: 최근 고점과 저점이 {direction} 방향의 5단계 파동 모양과 비슷합니다.\n"
-                          "주의: 세 규칙을 만족한 과거 모양이라는 뜻이며 다음 가격 방향, 파동 종료 또는 반전을 예측한 결과가 아닙니다.")
-                return self._item(name, f"{direction} 5단계 파동 모양 발견", detail, labels)
-        return self._item(name, "5단계 파동 모양 없음",
-                          "검사 내용: 최근 확정된 고점과 저점을 6개씩 묶어 세 가지 필수 규칙을 확인했습니다.\n"
-                          "결과: 세 규칙을 동시에 만족하는 상승 또는 하락 5단계 구간을 찾지 못했습니다.\n"
-                          "주의: 파동이 절대 없다는 뜻이 아니라, 현재 저장된 일봉과 전환점 기준으로 확인되지 않았다는 뜻입니다.")
+                labels = tuple((date, price,
+                                ("A/C 시작" if index == 0 else f"A/C-{index}") if direction == "하락"
+                                else "시작" if index == 0 else str(index))
+                               for index, (date, price, _) in enumerate(points))
+                return self._item(name, self._elliott_state(direction),
+                                  self._elliott_detail(points, direction), labels)
+        return self._item(name, "동인 5파 기본규칙 미충족",
+                          "검사 범위: 최근 확정된 고점과 저점을 6개씩 묶어 동인 5파의 세 가지 필수 가격 규칙을 확인했습니다.\n"
+                          "결과: 세 규칙을 동시에 만족하는 상승 또는 하락 동인 5파 후보를 찾지 못했습니다.\n"
+                          "해석 제한: 조정파는 3파 또는 그 조합이며 별도의 내부 구조 분석이 필요합니다. 이 결과만으로 파동이 없다고 단정할 수 없습니다.")
 
     def _livermore(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "제시 리버모어"
