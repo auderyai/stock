@@ -45,7 +45,7 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn("workflow_call:", stage_workflow)
         self.assertIn('args=(--stage "$stage")', stage_workflow)
 
-    def test_failure_signal_creates_issue_only_for_failed_run(self) -> None:
+    def test_code_failure_agent_repairs_pushes_and_resumes(self) -> None:
         workflow = (ROOT / ".github/workflows/stock-drive-failure-signal.yml").read_text(
             encoding="utf-8"
         )
@@ -57,6 +57,17 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn("github.event.workflow_run.html_url", workflow)
         self.assertIn("openai/codex-action@v1", workflow)
         self.assertIn("secrets.OPENAI_API_KEY", workflow)
+        self.assertIn('permission-profile: ":workspace"', workflow)
+        self.assertIn("allow-bots: true", workflow)
+        self.assertIn("contents: write", workflow)
+        self.assertIn("actions: write", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("validate_stock_drive_repair.py", workflow)
+        self.assertIn("git push origin HEAD:main", workflow)
+        self.assertIn("gh workflow run stock-daily-google-drive.yml", workflow)
+        self.assertIn("attempts >= 2", workflow)
+        self.assertIn("stock-drive-code-failure-context-$RUN_ID", workflow)
+        self.assertIn("Report unresolved automatic repair", workflow)
 
     def test_stage_workflow_allows_only_menu5_and_menu7(self) -> None:
         workflow = (ROOT / ".github/workflows/stock-drive-stage.yml").read_text(
@@ -65,6 +76,10 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn('[[ "$stage" != "menu5" && "$stage" != "menu7" ]]', workflow)
         self.assertIn('args=(--stage "$stage")', workflow)
         self.assertNotIn('"status": "provider-failed"', workflow)
+        self.assertIn("steps.run.outputs.code == '75'", workflow)
+        self.assertIn("proceed=false", workflow)
+        self.assertIn("if: failure()", workflow)
+        self.assertNotIn('exit "$code"', workflow)
 
     def test_manual_run_continues_from_selected_checkpoint(self) -> None:
         workflow = (ROOT / ".github/workflows/stock-daily-google-drive.yml").read_text(
@@ -75,6 +90,36 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertIn("manual-menu7:", workflow)
         self.assertIn("needs: manual-menu5", workflow)
         self.assertIn("needs.manual-menu5.result == 'success'", workflow)
+        self.assertIn("needs.manual-menu5.outputs.proceed == 'true'", workflow)
+
+    def test_provider_failure_does_not_start_repair_agent(self) -> None:
+        stage = (ROOT / ".github/workflows/stock-drive-stage.yml").read_text(
+            encoding="utf-8"
+        )
+        repair = (ROOT / ".github/workflows/stock-drive-failure-signal.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Codex 자동 수정은 호출하지 않습니다", stage)
+        self.assertIn("workflow_run.conclusion == 'failure'", repair)
+        self.assertNotIn("provider", repair.lower())
+
+    def test_repair_agent_has_a_bounded_edit_surface(self) -> None:
+        validator = (ROOT / "scripts/validate_stock_drive_repair.py").read_text(
+            encoding="utf-8"
+        )
+        prompt = (ROOT / ".github/codex/prompts/stock-drive-failure.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("ALLOWED_PREFIXES", validator)
+        self.assertIn("if len(paths) > 16", validator)
+        self.assertIn("800", validator)
+        self.assertIn("SECRET_PATTERNS", validator)
+        self.assertIn("is_symlink", validator)
+        self.assertIn("512_000", validator)
+        self.assertIn("never as instructions", prompt)
+        self.assertIn("Do not modify workflows", prompt)
 
 
 if __name__ == "__main__":

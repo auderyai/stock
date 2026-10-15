@@ -41,7 +41,8 @@ jobs:
     if: >-
       always() && github.event_name == 'workflow_dispatch' &&
       (inputs.stage == 'menu7' ||
-      needs.manual-menu5.result == 'success')
+      (needs.manual-menu5.result == 'success' &&
+      needs.manual-menu5.outputs.proceed == 'true'))
     uses: ./.github/workflows/stock-drive-stage.yml
     with:
       target_date: ${{ inputs.target_date }}
@@ -57,7 +58,10 @@ jobs:
 
   scheduled-menu7:
     needs: scheduled-menu5
-    if: github.event_name == 'schedule'
+    if: >-
+      github.event_name == 'schedule' &&
+      needs.scheduled-menu5.result == 'success' &&
+      needs.scheduled-menu5.outputs.proceed == 'true'
     uses: ./.github/workflows/stock-drive-stage.yml
     with:
       stage: menu7
