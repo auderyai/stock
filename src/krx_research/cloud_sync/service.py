@@ -317,6 +317,12 @@ class StockDriveSyncService:
             checkpoints.append(checkpoint)
             offset = next_offset
 
+        with self._connection(conninfo) as conn:
+            if not self._menu5_complete(conn, target_date):
+                raise CloudArchiveError(
+                    f"메뉴 5 완료 검증 실패: 요청일 전체 종목이 완료되지 않았습니다: {day}"
+                )
+
         metadata.pop("menu5_next_offset", None)
         metadata.pop("menu5_reference_date", None)
         metadata, checkpoint = self._publish_checkpoint(
@@ -542,9 +548,7 @@ class StockDriveSyncService:
     def _require_stage_base(
         cls, actual: date | None, target_date: date, stage: str
     ) -> None:
-        """Permit explicitly selected later stages without falsifying price state."""
-        if stage in {"menu5", "menu7"} and actual is not None and actual <= target_date:
-            return
+        """Require the requested trading-day base before later-stage collection."""
         cls._require_reference_date(actual, target_date, stage)
 
     @classmethod

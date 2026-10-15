@@ -124,6 +124,12 @@ class CloudSyncServiceTests(unittest.TestCase):
             date(2026, 10, 12), date(2026, 10, 12), "menu7"
         )
 
+    def test_later_stage_rejects_older_reference_date(self) -> None:
+        with self.assertRaisesRegex(CloudArchiveError, "기준일이 준비되지 않았습니다"):
+            StockDriveSyncService._require_stage_base(
+                date(2026, 10, 12), date(2026, 10, 13), "menu5"
+            )
+
     def test_completed_menu_is_not_run_again(self) -> None:
         self.assertTrue(StockDriveSyncService._stage_completed("menu5", "menu5"))
         self.assertTrue(StockDriveSyncService._stage_completed("menu7", "menu5"))
@@ -136,6 +142,8 @@ class CloudSyncServiceTests(unittest.TestCase):
         service = StockDriveSyncService(SyncContext(root, credentials))
         metadata = {"delta_folder_id": "deltas"}
 
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
         with patch.object(service, "_run", side_effect=[0, 0, 4]) as run, patch.object(
             service, "_publish_recovery_checkpoint",
             side_effect=[
@@ -145,7 +153,9 @@ class CloudSyncServiceTests(unittest.TestCase):
         ) as partial, patch.object(
             service, "_publish_checkpoint",
             return_value=({**metadata, "completed_stage": "menu5"}, {"stage": "menu5"}),
-        ) as final:
+        ) as final, patch.object(
+            service, "_connection", return_value=connection
+        ), patch.object(service, "_menu5_complete", return_value=True):
             result_metadata, checkpoints = service._run_menu5_checkpointed(
                 object(), metadata, root, "db", date(2026, 10, 12), "abcdef123456"
             )
@@ -155,6 +165,27 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual(1, final.call_count)
         self.assertEqual("menu5", result_metadata["completed_stage"])
         self.assertEqual(["menu5-partial", "menu5-partial", "menu5"], [c["stage"] for c in checkpoints])
+
+    def test_menu5_zero_rows_cannot_publish_completion(self) -> None:
+        root = Path.cwd()
+        service = StockDriveSyncService(SyncContext(
+            root, DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+
+        with patch.object(service, "_run", return_value=4), patch.object(
+            service, "_connection", return_value=connection
+        ), patch.object(service, "_menu5_complete", return_value=False), patch.object(
+            service, "_publish_checkpoint"
+        ) as publish:
+            with self.assertRaisesRegex(CloudArchiveError, "완료 검증 실패"):
+                service._run_menu5_checkpointed(
+                    object(), {"delta_folder_id": "deltas"}, root, "db",
+                    date(2026, 10, 13), "abcdef123456"
+                )
+
+        publish.assert_not_called()
 
     def test_cloud_menu5_returns_final_checkpoint_rows(self) -> None:
         target = date(2026, 10, 12)
@@ -229,12 +260,16 @@ class CloudSyncServiceTests(unittest.TestCase):
             "menu5_next_offset": 2700,
             "menu5_reference_date": "2026-10-12",
         }
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
 
         with patch.object(service, "_run", return_value=4) as run, patch.object(
             service,
             "_publish_checkpoint",
             return_value=({**metadata, "completed_stage": "menu5"}, {"stage": "menu5"}),
-        ):
+        ), patch.object(
+            service, "_connection", return_value=connection
+        ), patch.object(service, "_menu5_complete", return_value=True):
             service._run_menu5_checkpointed(
                 object(), metadata, root, "db", date(2026, 10, 13), "abcdef123456"
             )
