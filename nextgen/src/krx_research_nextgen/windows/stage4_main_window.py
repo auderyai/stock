@@ -23,6 +23,7 @@ from krx_research_nextgen.windows.chart_window import ChartWindow
 from krx_research_nextgen.windows.scenario_window import ScenarioWindow
 from krx_research_nextgen.windows.repeated_screen_window import RepeatedScreenWindow
 from krx_research_nextgen.workers.task_runner import TaskRunner
+from krx_research_nextgen.widgets.calendar_date_edit import CalendarDateEdit
 from krx_research_nextgen.windows.research_archive_window import ResearchArchiveWindow
 from krx_research_nextgen.windows.daily_research_window import DailyResearchWindow, SPECS
 from krx_research_nextgen.windows.reusable_code_window import ReusableCodeWindow
@@ -68,7 +69,7 @@ class Stage4MainWindow(QMainWindow):
         query = QGroupBox("조회 조건"); grid = QGridLayout(query)
         self.source = QComboBox(); self.source.addItem("데이터베이스")
         self.market = QComboBox(); self.market.addItems(["KRX", "NXT", "KRX+NXT"])
-        self.start_date = QComboBox(); self.end_date = QComboBox()
+        self.start_date = CalendarDateEdit(); self.end_date = CalendarDateEdit()
         self.rank_limit = QSpinBox(); self.rank_limit.setRange(1, 500); self.rank_limit.setValue(50); self.rank_limit.setSuffix(" 위")
         for row, pair in enumerate((("자료", self.source), ("시장", self.market), ("시작", self.start_date), ("종료", self.end_date), ("출력 순위", self.rank_limit))):
             grid.addWidget(QLabel(pair[0]), row, 0); grid.addWidget(pair[1], row, 1)
@@ -159,8 +160,8 @@ class Stage4MainWindow(QMainWindow):
         if not dates:
             self._status_failed("PostgreSQL에 선택 가능한 거래일이 없습니다.")
             return
-        for editor in (self.start_date, self.end_date):
-            editor.clear(); editor.addItems(dates); editor.setCurrentIndex(len(dates) - 1)
+        bounds = date.fromisoformat(min(dates)), date.fromisoformat(max(dates))
+        for editor in (self.start_date, self.end_date): editor.set_bounds(*bounds)
         self.status.setText(f"PostgreSQL · DB 기간 {earliest} ~ {latest}")
         for button in self.auxiliary_buttons[:2]: button.setEnabled(True)
 
@@ -433,7 +434,7 @@ class Stage4MainWindow(QMainWindow):
                 "alignments": presentation.alignments} if items else None
 
     def _checked_period(self) -> DateRange | None:
-        try: return DateRange(date.fromisoformat(self.start_date.currentText()), date.fromisoformat(self.end_date.currentText()))
+        try: return DateRange(self.start_date.value(), self.end_date.value())
         except ValueError as error:
             self.status.setText(str(error)); QMessageBox.warning(self, "기간 오류", str(error)); return None
 

@@ -20,12 +20,11 @@ def main() -> int:
         if not container.window.isVisible():
             raise RuntimeError("NextGen main window is not visible")
         status_deadline = time.monotonic() + 30
-        while container.window.end_date.count() < 1 and time.monotonic() < status_deadline:
+        while not container.window.end_date.isEnabled() and time.monotonic() < status_deadline:
             app.processEvents(); time.sleep(.01)
-        if container.window.end_date.count() < 1:
+        if not container.window.end_date.isEnabled():
             raise RuntimeError("Database trade dates were not loaded")
-        container.window.end_date.setCurrentIndex(container.window.end_date.count() - 1)
-        container.window.start_date.setCurrentText(container.window.end_date.currentText())
+        container.window.start_date.setDate(container.window.end_date.date())
         container.window._run_screening(ScreeningKind.HIGH_52W, 50, "ALL")
         screen_deadline = time.monotonic() + 30
         while not container.window.run_button.isEnabled() and time.monotonic() < screen_deadline:
