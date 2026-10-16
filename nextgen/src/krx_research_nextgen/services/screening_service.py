@@ -23,11 +23,19 @@ class ScreeningService:
             ohlcv_relation=self._repository.ohlcv_relation,
             master_relation=self._repository.master_relation,
         ) as task:
-            if period is not None:
+            ranged = (
+                period is not None and query.kind is ScreeningKind.HIGH_52W
+                and period.start != period.end
+            )
+            if period is not None and not ranged:
                 self.validate_period(period)
             latest = self._repository.latest_trade_date()
             task.info(f"latest_trade_date={latest}")
-            rows = self._repository.run(query)
+            if ranged:
+                daily_rows = self._rows_by_date(query, self._period_dates(query, period))
+                rows = [row for _, daily in daily_rows for row in daily]
+            else:
+                rows = self._repository.run(query)
             for key, value in dict(self._repository.last_metrics).items():
                 task.info(f"{key}={value}")
             task.info(f"result_count={len(rows)}")
@@ -66,16 +74,13 @@ class ScreeningService:
         """Aggregate stocks appearing in the selected screen on at least two stored periods."""
         start, end = period.start.isoformat(), period.end.isoformat()
         with TaskLog("repeated_screening", kind=query.kind.value, start=start, end=end, limit=query.limit) as task:
-            self.validate_period(period)
-            stored_dates = self._repository.period_trade_dates(start, end, weekly=query.kind in WEEKLY_KINDS)
-            dates = self._repository.period_dates_with_membership(query.market, stored_dates)
-            if not dates:
-                raise ValueError("선택한 기간에 필요한 PostgreSQL 거래일 또는 지수 구성종목 자료가 없습니다.")
+            dates = self._period_dates(query, period)
             if len(dates) < 2:
                 raise ValueError("기간 내 다빈도 종목은 서로 다른 거래일이 2일 이상 필요합니다.")
+            daily_rows = self._rows_by_date(query, dates)
             appearances: dict[str, dict[str, ScreeningResult]] = {}
-            for trade_date in dates:
-                for row in self._repository.run(replace(query, as_of_date=trade_date)):
+            for trade_date, rows in daily_rows:
+                for row in rows:
                     appearances.setdefault(row.stock_code, {})[trade_date] = row
             repeated = {code: rows for code, rows in appearances.items() if len(rows) >= 2}
             metrics = self._repository.period_stock_metrics(list(repeated), start, end)
@@ -96,10 +101,28 @@ class ScreeningService:
                     None if latest_metric.get("close") is None else float(latest_metric["close"]),
                 ))
             results.sort(key=lambda row: (-row.appearance_count, row.stock_name, row.stock_code))
-            task.info(f"periods={len(dates)}"); task.info(f"skipped_periods={len(stored_dates)-len(dates)}")
+            task.info(f"periods={len(daily_rows)}")
             task.info(f"occurrences={sum(len(x) for x in appearances.values())}")
             task.info(f"repeated_stocks={len(results)}")
             return results
+
+    def _period_dates(self, query: ScreeningQuery, period: DateRange) -> list[str]:
+        self.validate_period(period)
+        dates = self._repository.period_dates_with_membership(
+            query.market,
+            self._repository.period_trade_dates(
+                period.start.isoformat(), period.end.isoformat(),
+                weekly=query.kind in WEEKLY_KINDS,
+            ),
+        )
+        if not dates:
+            raise ValueError("선택한 기간에 필요한 PostgreSQL 거래일 또는 지수 구성종목 자료가 없습니다.")
+        return sorted(dates)
+
+    def _rows_by_date(
+        self, query: ScreeningQuery, dates: list[str]
+    ) -> list[tuple[str, list[ScreeningResult]]]:
+        return [(day, self._repository.run(replace(query, as_of_date=day))) for day in dates]
 
     def ensure_performance_indexes(self) -> list[dict[str, str]]:
         with TaskLog(

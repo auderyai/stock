@@ -190,9 +190,6 @@ class Stage4MainWindow(QMainWindow):
     def _run_selected(self) -> None:
         spec = self._selected_spec()
         if not spec: QMessageBox.information(self, "조회", "스크리닝 항목을 선택하십시오."); return
-        if (spec.kind is ScreeningKind.HIGH_52W and
-                self.start_date.value() != self.end_date.value()):
-            self._run_repeated(); return
         self._run_screening(spec.kind, self.rank_limit.value(), spec.market, spec.title)
 
     def _run_numbered_screen(self, number: int, period: tuple[date, date], limit: int) -> tuple[str, list[dict]]:
@@ -217,6 +214,7 @@ class Stage4MainWindow(QMainWindow):
         if period is None: return
         self.run_button.setEnabled(False); self.status.setText("스크리닝 조회 중입니다...")
         date = period.end.isoformat()
+        ranged = kind is ScreeningKind.HIGH_52W and period.start != period.end
         comparison, near_low, near_high = self._comparison_code, self.near_low.value(), self.near_high.value()
         self._tasks.submit(
             lambda: self._screening.run(
@@ -224,19 +222,18 @@ class Stage4MainWindow(QMainWindow):
                 comparison_ticker=comparison, near_low=near_low, near_high=near_high,
                 as_of_date=date, period=period,
             ),
-            on_result=lambda rows: self._screening_ready(rows, title or kind.value, period),
+            on_result=lambda rows: self._screening_ready(rows, title or kind.value, period, ranged),
             on_error=lambda trace: self._show_error("스크리닝 오류", trace),
             on_finished=lambda: self.run_button.setEnabled(True), channel="screening",
         )
 
-    def _screening_ready(self, rows, title: str, period: DateRange) -> None:
+    def _screening_ready(self, rows, title: str, period: DateRange, ranged: bool = False) -> None:
         self._active_task_title = f"{title} · 데이터베이스"
         self._results = rows; self._table_navigation = None
         self._populate_screening(rows); self.heading.setText(self._active_task_title)
-        self.status.setText(
-            f"{len(rows):,}개 종목 · PostgreSQL · 선택기간 {period.start} ~ {period.end} · "
-            f"판정기준일 {period.end}"
-        )
+        dates = sorted({row.trade_date for row in rows})
+        basis = f"기준일별 {len(dates):,}거래일" if ranged else f"판정기준일 {period.end}"
+        self.status.setText(f"{len(rows):,}건 · PostgreSQL · 선택기간 {period.start} ~ {period.end} · {basis}")
 
     def _run_near_high(self) -> None:
         self._run_screening(ScreeningKind.NEAR_HIGH_52W, self.rank_limit.value(), "ALL", "52주 최고가 대비 종가 구간")
