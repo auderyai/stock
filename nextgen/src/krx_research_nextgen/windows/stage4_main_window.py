@@ -190,6 +190,9 @@ class Stage4MainWindow(QMainWindow):
     def _run_selected(self) -> None:
         spec = self._selected_spec()
         if not spec: QMessageBox.information(self, "조회", "스크리닝 항목을 선택하십시오."); return
+        if (spec.kind is ScreeningKind.HIGH_52W and
+                self.start_date.value() != self.end_date.value()):
+            self._run_repeated(); return
         self._run_screening(spec.kind, self.rank_limit.value(), spec.market, spec.title)
 
     def _run_numbered_screen(self, number: int, period: tuple[date, date], limit: int) -> tuple[str, list[dict]]:
