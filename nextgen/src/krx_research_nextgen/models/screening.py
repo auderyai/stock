@@ -26,6 +26,8 @@ class ScreeningQuery:
     near_low: float = -10.0
     near_high: float = 0.0
     as_of_date: str | None = None
+    source_mode: str = "database"
+    quote_venue: str = "KRX"
 
 
 @dataclass(frozen=True)

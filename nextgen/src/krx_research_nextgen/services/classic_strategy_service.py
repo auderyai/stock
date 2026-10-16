@@ -59,6 +59,56 @@ class ClassicStrategyService:
         return None
 
     @staticmethod
+    def _turns(points) -> str:
+        return " → ".join(
+            f"{date:%Y-%m-%d} {'고점' if kind == 'H' else '저점'} {price:,.0f}원"
+            for date, price, kind in points
+        )
+
+    @classmethod
+    def _elliott_failure_detail(cls, points, daily: pd.DataFrame) -> str:
+        latest_date, latest_close = daily.index[-1], float(daily.close.iloc[-1])
+        lines = [
+            f"최근 기준일: {latest_date:%Y-%m-%d}, 종가 {latest_close:,.0f}원",
+            "상태 해설: 최근에 확정된 전환점만으로는 완성된 동인 5파 후보를 확인할 수 없습니다.",
+            "쉬운 뜻: 파동이 전혀 없다는 뜻이 아니라, 지금 보이는 고점·저점 배열을 1→2→3→4→5로 붙이기에는 필수 가격 규칙이 부족하다는 뜻입니다.",
+            "검사 범위: 과거의 보기 좋은 구간을 다시 선택하지 않고 최근 전환점 6개만 검사합니다.",
+            "과거에 끝난 유효 구간으로 대신 판정하지 않았습니다.",
+        ]
+        if len(points) < 6:
+            lines += [
+                f"확정 전환점: {len(points)}개(필요 6개) → 자료 진행 중",
+                "확인이 더 필요한 것: 중심 이동 전후의 고점과 저점이 추가로 확정되어야 5개 소파동을 검사할 수 있습니다.",
+            ]
+        else:
+            prices = [point[1] for point in points]
+            kinds = "".join(point[2] for point in points)
+            lines.append(f"최근 전환점: {cls._turns(points)}")
+            lines.append(f"고점·저점 배열: {kinds} → {'상승 후보 배열' if kinds == 'LHLHLH' else '하락 A/C 내부 후보 배열' if kinds == 'HLHLHL' else '교대 배열 미성립'}")
+            if kinds in {"LHLHLH", "HLHLHL"}:
+                up = kinds == "LHLHLH"
+                p0, p1, p2, p3, p4, p5 = prices
+                wave2 = p2 > p0 if up else p2 < p0
+                wave4 = p4 > p1 if up else p4 < p1
+                lengths = (abs(p1 - p0), abs(p3 - p2), abs(p5 - p4))
+                third = lengths[1] >= min(lengths)
+                extreme = p5 > p4 if up else p5 < p4
+                checks = (
+                    ("2파가 1파 시작점을 침범하지 않음", wave2, f"시작 {p0:,.0f}원 / 2파 끝 {p2:,.0f}원"),
+                    ("3파가 1·3·5파 중 가장 짧지 않음", third, f"1파 {lengths[0]:,.0f}원 / 3파 {lengths[1]:,.0f}원 / 5파 {lengths[2]:,.0f}원"),
+                    ("4파가 1파 가격영역을 침범하지 않음", wave4, f"1파 끝 {p1:,.0f}원 / 4파 끝 {p4:,.0f}원"),
+                    ("마지막 소파동이 진행 방향으로 형성됨", extreme, f"4파 끝 {p4:,.0f}원 / 마지막 끝 {p5:,.0f}원"),
+                )
+                lines += [f"{index}. {label}: {evidence} → {'통과' if passed else '미통과'}"
+                          for index, (label, passed, evidence) in enumerate(checks, 1)]
+        lines += [
+            "현재 해석: 최근 구조는 조정 진행, 파동 미완성, 복합조정 또는 다른 파동 차수일 수 있어 한 가지 이름으로 확정하지 않습니다.",
+            "다음 확인점: 새 고점·저점이 확정되면 최근 6개 전환점을 다시 구성하여 같은 규칙을 처음부터 재검사합니다.",
+            "한계: 자동 판정은 가격 전환점과 세 가지 불변 가격 규칙만 확인하며, 내부 세부파동·파동 차수·교대 법칙·피보나치 비율은 확정 근거로 사용하지 않습니다.",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
     def _elliott_current_state(points, direction: str, daily: pd.DataFrame) -> str:
         p4, p5, latest = points[4][1], points[5][1], float(daily.close.iloc[-1])
         if direction == "상승":
@@ -79,10 +129,7 @@ class ClassicStrategyService:
         wave2_margin = p2 - p0 if direction == "상승" else p0 - p2
         overlap_margin = p4 - p1 if direction == "상승" else p1 - p4
         fifth_margin = p5 - p3 if direction == "상승" else p3 - p5
-        turns = " → ".join(
-            f"{'시작' if index == 0 else f'{index}파 끝'} {date:%Y-%m-%d} {price:,.0f}원"
-            for index, (date, price, _) in enumerate(points)
-        )
+        turns = ClassicStrategyService._turns(points)
         roles = ("상위 상승 추세의 동인파 또는 상위 하락 추세 조정의 A파나 C파에 해당할 수 있습니다." if direction == "상승" else
                  "현재 구간은 A파 또는 C파 내부 후보입니다. A파라면 이후 B파 반등과 C파 하락이 남아 있고, "
                  "C파라면 앞선 A파와 B파를 추가로 확인해야 합니다.")
@@ -98,8 +145,12 @@ class ClassicStrategyService:
         latest_date, latest_close = daily.index[-1], float(daily.close.iloc[-1])
         days_after = int((daily.index > points[-1][0]).sum())
         current = ClassicStrategyService._elliott_current_state(points, direction, daily)
+        support, resistance = ((p4, p5) if direction == "상승" else (p5, p4))
+        support_gap = (latest_close / support - 1) * 100
+        resistance_gap = (latest_close / resistance - 1) * 100
         return (f"최근 기준일: {latest_date:%Y-%m-%d}, 종가 {latest_close:,.0f}원\n"
                 f"현재 상황: {current}\n"
+                "쉬운 뜻: 최근 고점과 저점을 순서대로 연결했을 때 동인 5개 소파동의 최소 가격 규칙이 맞는지 검사한 결과입니다. 모양이 비슷하다는 이유만으로 파동 번호를 붙이지 않습니다.\n"
                 f"최근 확정 파동점 이후: {days_after}거래일\n"
                 f"확인 구간: {points[0][0]:%Y-%m-%d} ~ {points[-1][0]:%Y-%m-%d}\n"
                 f"{layout_title}: {turns}\n"
@@ -109,8 +160,11 @@ class ClassicStrategyService:
                 f"③ 4파 규칙: 1파 가격 영역과 겹치지 않음, 여유 {overlap_margin:,.0f}원 → 통과\n"
                 f"④ 되돌림 참고값: 2파는 1파의 {retrace2:.1f}%, 4파는 3파의 {retrace4:.1f}%\n"
                 f"⑤ {fifth_title}: {fifth}\n"
+                f"현재 관찰 가격: 지지 확인선 {support:,.0f}원(종가가 {abs(support_gap):.1f}% {'상회' if support_gap >= 0 else '하회'}), "
+                f"직전 극값 {resistance:,.0f}원(종가가 {abs(resistance_gap):.1f}% {'상회' if resistance_gap >= 0 else '하회'})\n"
                 f"{abc}"
                 f"상위 파동 역할: 미확정. {roles}\n"
+                "다음 확인: 직전 극값을 진행 방향으로 넘으면 연장 가능성을 다시 검사하고, 지지 확인선을 반대 방향으로 이탈하면 현재 후보를 약화 또는 무효로 처리합니다. 이는 매수·매도 지시가 아닙니다.\n"
                 "아직 확인하지 못한 항목: 1·3·5파 내부의 5개 세부파동, 2·4파 내부의 3개 세부파동, "
                 "파동 차수, 조정 형태와 대안 파동 수.\n"
                 f"최종 해석: {conclusion}")
@@ -126,12 +180,10 @@ class ClassicStrategyService:
                            for index, (date, price, _) in enumerate(points))
             return self._item(name, self._elliott_current_state(points, direction, daily),
                               self._elliott_detail(points, direction, daily), labels)
-        basis = f"{daily.index[-1]:%Y-%m-%d}" if not daily.empty else "자료 없음"
+        if daily.empty:
+            return self._item(name, "자료부족", "유효한 일봉 OHLCV가 없어 최근 파동을 판정할 수 없습니다.")
         return self._item(name, "최근 기준일 파동 규칙 미충족",
-                          f"최근 기준일: {basis}\n"
-                          "검사 범위: 가장 최근에 확정된 고점과 저점 6개만 사용해 동인 5파의 세 가지 필수 가격 규칙을 확인했습니다.\n"
-                          "결과: 최근 구조는 세 규칙을 동시에 만족하지 않습니다. 과거에 끝난 유효 구간으로 대신 판정하지 않았습니다.\n"
-                          "해석 제한: 조정파는 3파 또는 그 조합이며 별도의 내부 구조 분석이 필요합니다. 이 결과만으로 파동이 없다고 단정할 수 없습니다.")
+                          self._elliott_failure_detail(points, daily))
 
     def _livermore(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "제시 리버모어"
@@ -150,15 +202,20 @@ class ClassicStrategyService:
                       "가격은 돌파했지만 거래량 증가 조건이 부족합니다." if breakout else
                       "거래량은 증가했지만 가격이 최근 1년 최고가를 돌파하지 못했습니다." if heavy else
                       "가격과 거래량 조건을 모두 만족하지 못했습니다.")
+        needed_volume = average * 1.5
         detail = (f"계산 기준일: {daily.index[-1]:%Y-%m-%d}\n"
+                  "쉬운 뜻: 최근 1년 동안 매도 물량이 나왔던 최고 가격을 종가로 넘어섰는지, 그 돌파에 평소보다 충분한 거래가 실렸는지를 함께 봅니다.\n"
                   f"① 가격 조건: 종가 {last.close:,.0f}원 > 직전 252거래일 최고가 {pivot:,.0f}원"
                   f"({pivot_date:%Y-%m-%d}) → {price_result}\n"
                   f"   차이: {abs(gap):,.0f}원, 최고가 대비 {abs(gap) / pivot * 100:.1f}% "
                   f"{'높음' if gap > 0 else '낮음'}\n"
                   f"② 거래량 조건: 오늘 {last.volume:,.0f}주 ÷ 직전 20일 평균 {average:,.0f}주 = "
                   f"{ratio:.2f}배, 필요 기준 1.50배 이상 → {volume_result}\n"
+                  f"   필요한 거래량 {needed_volume:,.0f}주, 현재 {'충족' if heavy else f'{max(0, needed_volume - float(last.volume)):,.0f}주 부족'}\n"
+                  f"다음 확인: 종가가 {pivot:,.0f}원을 초과한 상태와 거래량 {needed_volume:,.0f}주 이상이 같은 기준일에 함께 나타나는지 확인합니다.\n"
                   f"최종 해석: {conclusion}\n"
-                  "참고: 시장 전체와 업종의 강도는 이 판정에 포함하지 않습니다.")
+                  "실패·약화 해석: 돌파 후 다시 피벗 아래로 내려오면 실패 돌파일 수 있고, 거래량 없는 돌파는 수요 확인이 약합니다.\n"
+                  "한계: 종가 기준의 기계적 판정이며 추세의 지속기간, 시장·업종 상대강도, 매물대, 손절 위치와 기업가치는 포함하지 않습니다. 돌파 사실은 수익 보장이 아닙니다.")
         return self._item(name, state, detail, levels=(("price", pivot, "최근 1년 최고가"), ("volume", average, "직전 20일 평균 거래량")))
 
     def _elder(self, daily: pd.DataFrame) -> StrategyAssessment:
@@ -172,6 +229,7 @@ class ClassicStrategyService:
         if len(histogram) < 2 or len(stochastic) < 1: return self._item(name, "자료부족", "완성된 주봉 MACD-Histogram과 일봉 Slow Stochastic 자료가 부족합니다.")
         prior_hist, current_hist = float(histogram.iloc[-2]), float(histogram.iloc[-1])
         rising, k = current_hist > prior_hist, float(stochastic.iloc[-1].slow_k)
+        d = float(stochastic.iloc[-1].slow_d)
         last, previous = daily.iloc[-1], daily.iloc[-2]
         long_setup, short_setup = rising and k < 30, not rising and k > 70
         price_cross = last.high > previous.high if rising else last.low < previous.low
@@ -184,14 +242,20 @@ class ClassicStrategyService:
         daily_value = float(last.high if rising else last.low)
         oscillator_rule = "30 미만" if rising else "70 초과"
         price_rule = ">" if rising else "<"
+        direction_word = "상승" if rising else "하락"
+        interest_word = "매수" if rising else "매도"
         detail = (f"계산 기준일: {daily.index[-1]:%Y-%m-%d}\n"
+                  "쉬운 뜻: 큰 시간축인 주봉으로 거래 방향을 먼저 정하고, 일봉의 과매도·과매수 구간에서 준비한 뒤, 직전일 가격을 실제로 넘을 때만 최종 확인합니다.\n"
                   f"① 주봉 방향: MACD 힘 지표가 {prior_hist:,.2f}에서 {current_hist:,.2f}로 "
-                  f"{'상승' if rising else '하락'} → {'매수' if rising else '매도'} 방향 확인\n"
-                  f"② 일봉 시점: 과열·침체 지표 {k:.1f}, 필요 기준 {oscillator_rule} → "
+                  f"{direction_word}(변화폭 {abs(current_hist - prior_hist):.2f}) → {interest_word} 방향 확인\n"
+                  f"② 일봉 시점: Slow K {k:.1f}, Slow D {d:.1f}, 필요 기준 K {oscillator_rule} → "
                   f"{'통과' if setup else '미통과'}\n"
                   f"③ 가격 확인: 오늘 {'고가' if rising else '저가'} {daily_value:,.0f}원 {price_rule} "
                   f"{label} {entry:,.0f}원 → {'통과' if price_cross else '미통과'}\n"
+                  f"다음 확인: 주봉 힘 지표의 {direction_word} 방향이 유지되고, Slow K가 {oscillator_rule}인 상태에서 "
+                  f"가격이 {entry:,.0f}원을 {'초과' if rising else '미만'}해야 세 화면이 동시에 맞습니다.\n"
                   f"최종 해석: {'세 조건이 모두 맞아 진입 조건이 확인되었습니다.' if trigger else '아직 세 조건이 모두 맞지 않아 진입 신호가 아닙니다.'}\n"
-                  "주의: 세 조건의 순서를 확인하는 규칙이며 수익을 보장하거나 자동 매매를 지시하지 않습니다.")
+                  "실패·약화 해석: 가격 확인 뒤 곧바로 기준 가격 안으로 돌아오거나 주봉 힘의 방향이 반전되면 신호의 신뢰가 약해집니다.\n"
+                  "한계: 현재 주가 진행 중이면 이번 주 주봉도 미완성입니다. 추세·시점·가격 확인의 순서만 검사하며 거래비용, 손절폭, 시장 위험과 기업가치는 포함하지 않습니다. 수익 보장이나 자동매매 지시가 아닙니다.")
         levels = (("price", entry, f"엘더 {label}"), ("stochastic", 30.0, "매수 관심 30"), ("stochastic", 70.0, "매도 관심 70"))
         return self._item(name, state, detail, levels=levels)

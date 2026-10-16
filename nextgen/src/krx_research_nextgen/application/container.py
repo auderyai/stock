@@ -6,6 +6,7 @@ from krx_research_nextgen.controllers.auxiliary_controller import AuxiliaryContr
 from krx_research_nextgen.repositories.auxiliary_repository import AuxiliaryRepository
 from krx_research_nextgen.repositories.postgresql_chart_repository import PostgreSQLChartRepository
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
+from krx_research_nextgen.repositories.realtime_screening_repository import RealtimeScreeningRepository
 from krx_research_nextgen.repositories.security_repository import SecurityRepository
 from krx_research_nextgen.services.market_chart_service import MarketChartService
 from krx_research_nextgen.services.screening_service import ScreeningService
@@ -16,6 +17,7 @@ from krx_research_nextgen.windows.stage4_main_window import Stage4MainWindow
 from pathlib import Path
 from krx_research.database.settings import resolve_database_target
 from krx_research.qt.services.assistant_service import AssistantService
+from krx_research.ui.data import WorkstationData
 
 
 class ApplicationContainer:
@@ -31,10 +33,12 @@ class ApplicationContainer:
             ScenarioService(),
         )
         self.auxiliary_controller = AuxiliaryController(AuxiliaryService(AuxiliaryRepository()))
-        self.assistant_service = AssistantService(resolve_database_target(Path(r"C:\stock"), read_only=True))
+        database_target = resolve_database_target(Path(r"C:\stock"), read_only=True)
+        self.assistant_service = AssistantService(database_target)
+        self.realtime_screening_repository = RealtimeScreeningRepository(WorkstationData(database_target))
         self.window = Stage4MainWindow(
             self.main_controller,
-            ScreeningController(ScreeningService(self.screening_repository)),
+            ScreeningController(ScreeningService(self.screening_repository, self.realtime_screening_repository)),
             self.auxiliary_controller,
             self.assistant_service,
         )

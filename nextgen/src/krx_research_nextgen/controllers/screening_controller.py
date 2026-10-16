@@ -32,6 +32,8 @@ class ScreeningController:
         near_high: float = 0.0,
         as_of_date: str | None = None,
         period: DateRange | None = None,
+        source_mode: str = "database",
+        quote_venue: str = "KRX",
     ) -> list[ScreeningResult]:
         return self._service.run(
             ScreeningQuery(
@@ -39,6 +41,8 @@ class ScreeningController:
                 comparison_ticker=comparison_ticker,
                 near_low=near_low, near_high=near_high,
                 as_of_date=as_of_date,
+                source_mode=source_mode,
+                quote_venue=quote_venue,
             ), period=period,
         )
 

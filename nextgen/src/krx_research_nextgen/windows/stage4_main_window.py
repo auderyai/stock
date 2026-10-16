@@ -64,10 +64,10 @@ class Stage4MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal, self); self.setCentralWidget(splitter)
         left = QWidget(); left_layout = QVBoxLayout(left)
         title = QLabel("Stock · PyQt6"); title.setStyleSheet("font-size:18px;font-weight:700")
-        left_layout.addWidget(title); left_layout.addWidget(QLabel("데이터베이스: PostgreSQL 전용 · C:\\stock\\.env 기준"))
+        left_layout.addWidget(title); left_layout.addWidget(QLabel("자료: PostgreSQL 확정값 또는 현재 시세 · C:\\stock\\.env 기준"))
 
         query = QGroupBox("조회 조건"); grid = QGridLayout(query)
-        self.source = QComboBox(); self.source.addItem("데이터베이스")
+        self.source = QComboBox(); self.source.addItem("데이터베이스", "database"); self.source.addItem("실시간", "realtime")
         self.market = QComboBox(); self.market.addItems(["KRX", "NXT", "KRX+NXT"])
         self.start_date = CalendarDateEdit(); self.end_date = CalendarDateEdit()
         self.rank_limit = QSpinBox(); self.rank_limit.setRange(1, 500); self.rank_limit.setValue(50); self.rank_limit.setSuffix(" 위")
@@ -216,24 +216,29 @@ class Stage4MainWindow(QMainWindow):
         date = period.end.isoformat()
         ranged = kind is ScreeningKind.HIGH_52W and period.start != period.end
         comparison, near_low, near_high = self._comparison_code, self.near_low.value(), self.near_high.value()
+        source_mode = str(self.source.currentData())
+        quote_venue = self.market.currentText()
         self._tasks.submit(
             lambda: self._screening.run(
                 kind, limit=limit, market=market,
                 comparison_ticker=comparison, near_low=near_low, near_high=near_high,
                 as_of_date=date, period=period,
+                source_mode=source_mode,
+                quote_venue=quote_venue,
             ),
-            on_result=lambda rows: self._screening_ready(rows, title or kind.value, period, ranged),
+            on_result=lambda rows: self._screening_ready(rows, title or kind.value, period, ranged, source_mode),
             on_error=lambda trace: self._show_error("스크리닝 오류", trace),
             on_finished=lambda: self.run_button.setEnabled(True), channel="screening",
         )
 
-    def _screening_ready(self, rows, title: str, period: DateRange, ranged: bool = False) -> None:
-        self._active_task_title = f"{title} · 데이터베이스"
+    def _screening_ready(self, rows, title: str, period: DateRange, ranged: bool = False, source_mode: str = "database") -> None:
+        source_label = "실시간" if source_mode == "realtime" else "데이터베이스"
+        self._active_task_title = f"{title} · {source_label}"
         self._results = rows; self._table_navigation = None
         self._populate_screening(rows); self.heading.setText(self._active_task_title)
         dates = sorted({row.trade_date for row in rows})
-        basis = f"기준일별 {len(dates):,}거래일" if ranged else f"판정기준일 {period.end}"
-        self.status.setText(f"{len(rows):,}건 · PostgreSQL · 선택기간 {period.start} ~ {period.end} · {basis}")
+        basis = f"기준일별 {len(dates):,}거래일" if ranged else f"판정기준일 {dates[-1] if dates else period.end}"
+        self.status.setText(f"{len(rows):,}건 · {source_label} · {basis}")
 
     def _run_near_high(self) -> None:
         self._run_screening(ScreeningKind.NEAR_HIGH_52W, self.rank_limit.value(), "ALL", "52주 최고가 대비 종가 구간")
@@ -242,6 +247,8 @@ class Stage4MainWindow(QMainWindow):
         spec, period = self._selected_spec(), self._checked_period()
         if not spec: QMessageBox.information(self, "조회", "스크리닝 항목을 선택하십시오."); return
         if period is None or spec.kind is None: return
+        if self.source.currentData() == "realtime":
+            QMessageBox.information(self, "기간 내 다빈도 종목", "다빈도 계산은 여러 확정 거래일이 필요하므로 데이터베이스 자료로 실행합니다.")
         self.repeated_button.setEnabled(False)
         self.status.setText(f"{period.start} ~ {period.end} 각 거래일의 {spec.title}를 계산하는 중입니다...")
         comparison, low, high = self._comparison_code, self.near_low.value(), self.near_high.value()

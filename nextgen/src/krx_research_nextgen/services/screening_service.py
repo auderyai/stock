@@ -11,10 +11,17 @@ WEEKLY_KINDS = {ScreeningKind.WEEKLY_GAINERS, ScreeningKind.WEEKLY_TURNOVER_TOP,
 
 
 class ScreeningService:
-    def __init__(self, repository: ScreeningRepository) -> None:
+    def __init__(self, repository: ScreeningRepository, realtime_repository=None) -> None:
         self._repository = repository
+        self._realtime = realtime_repository
 
     def run(self, query: ScreeningQuery, *, period: DateRange | None = None) -> list[ScreeningResult]:
+        if query.source_mode == "realtime":
+            if self._realtime is None:
+                raise RuntimeError("실시간 조회 서비스가 구성되지 않았습니다.")
+            return self._realtime.run(query)
+        if query.source_mode != "database":
+            raise ValueError(f"지원하지 않는 자료 종류입니다: {query.source_mode}")
         with TaskLog(
             "screening",
             kind=query.kind.value,

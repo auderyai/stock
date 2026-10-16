@@ -34,14 +34,18 @@ def main() -> None:
     recent = service._elliott(frame(40))
     assert recent.state == "최근 기준일 파동 규칙 미충족"
     assert "과거에 끝난 유효 구간으로 대신 판정하지 않았습니다" in recent.detail
+    assert all(text in recent.detail for text in ("쉬운 뜻:", "현재 해석:", "다음 확인점:", "한계:"))
     service = ClassicStrategyService()
     assert service.assess(frame(252))[1].state == "자료부족"
     data = frame(253); data.iloc[-1] = [240, 300, 235, 250, 2_000]
     results = service.assess(data)
     assert results[1].state == "최고가 돌파·거래량 증가" and "2.00배" in results[1].detail
     assert "직전 252거래일 최고가" in results[1].detail
+    assert "현재 판단:" in results[1].text()
+    assert all(text in results[1].detail for text in ("필요한 거래량", "다음 확인:", "실패·약화 해석:", "한계:"))
     assert {level[0] for level in results[1].levels} == {"price", "volume"}
     assert {level[0] for level in results[2].levels} == {"price", "stochastic"}
+    assert all(text in results[2].detail for text in ("Slow K", "Slow D", "다음 확인:", "실패·약화 해석:", "한계:"))
     explanations = "\n".join(result.text() for result in results)
     assert "현재 판단:" in explanations
     assert ("2파 규칙:" in results[0].detail or "검사 범위:" in results[0].detail)

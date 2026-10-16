@@ -1,104 +1,50 @@
-"""Local KRX workstation user interface."""
+"""Local KRX workstation UI APIs, loaded only when requested."""
 
-from .chart_options import ChartDisplayOptions, LABEL_TO_TIMEFRAME
-from .charts import (
-    DEFAULT_PROFILE_BINS,
-    MAX_PROFILE_BINS,
-    MIN_PROFILE_BINS,
-    build_chart_figure,
-)
-from .classic_strategies import (
-    ALEXANDER_ELDER,
-    ALL_STRATEGIES,
-    ELLIOTT_WAVE,
-    JESSE_LIVERMORE,
-    STRATEGY_OPTIONS,
-    ClassicStrategyAssessment,
-    assess_classic_strategies,
-    format_strategy_assessments,
-)
-from .data import (
-    DAILY_GAINER_SCREEN_TYPES,
-    DATA_SOURCE_MODES,
-    DATABASE_SOURCE_MODE,
-    INDEX_RELATED_SCREEN_TYPES,
-    INDEX_WEEKLY_SCREEN_TYPES,
-    MARKET_GAINER_DEFINITIONS,
-    MARKET_GAINER_SCREEN_TYPES,
-    MARKET_RESULT_SCREEN_TYPES,
-    MARKET_TRADING_VALUE_SCREEN_TYPES,
-    REALTIME_SOURCE_MODE,
-    SCREEN_TITLES,
-    WEEKLY_SCREEN_TYPES,
-    ChartDataset,
-    ScreenDataset,
-    WorkstationData,
-    build_index_gainer_rows,
-    build_index_weekly_gainer_rows,
-    build_market_gainer_rows,
-    build_market_trading_value_rows,
-    calculate_volume_profile,
-    describe_screen_freshness,
-    overlay_realtime_quotes,
-    select_chart_window,
-)
-from .rise_reason import (
-    GoogleNewsItem,
-    RiseReasonLookupError,
-    RiseReasonReport,
-    build_google_news_query,
-    build_google_news_urls,
-    fetch_google_rise_reason,
-    format_rise_reason_report,
-    parse_google_news_rss,
-)
-from .on_demand import TIMEFRAME_LABELS
+from __future__ import annotations
 
-__all__ = [
-    "ALEXANDER_ELDER",
-    "ALL_STRATEGIES",
-    "ChartDisplayOptions",
-    "DAILY_GAINER_SCREEN_TYPES",
-    "DATABASE_SOURCE_MODE",
-    "DATA_SOURCE_MODES",
-    "DEFAULT_PROFILE_BINS",
-    "ELLIOTT_WAVE",
-    "JESSE_LIVERMORE",
-    "INDEX_RELATED_SCREEN_TYPES",
-    "INDEX_WEEKLY_SCREEN_TYPES",
-    "LABEL_TO_TIMEFRAME",
-    "MARKET_GAINER_DEFINITIONS",
-    "MARKET_GAINER_SCREEN_TYPES",
-    "MARKET_RESULT_SCREEN_TYPES",
-    "MARKET_TRADING_VALUE_SCREEN_TYPES",
-    "MAX_PROFILE_BINS",
-    "MIN_PROFILE_BINS",
-    "REALTIME_SOURCE_MODE",
-    "SCREEN_TITLES",
-    "WEEKLY_SCREEN_TYPES",
-    "STRATEGY_OPTIONS",
-    "TIMEFRAME_LABELS",
-    "ChartDataset",
-    "ClassicStrategyAssessment",
-    "GoogleNewsItem",
-    "RiseReasonLookupError",
-    "RiseReasonReport",
-    "ScreenDataset",
-    "WorkstationData",
-    "assess_classic_strategies",
-    "build_chart_figure",
-    "build_google_news_query",
-    "build_google_news_urls",
-    "build_index_gainer_rows",
-    "build_index_weekly_gainer_rows",
-    "build_market_gainer_rows",
-    "build_market_trading_value_rows",
-    "calculate_volume_profile",
-    "describe_screen_freshness",
-    "fetch_google_rise_reason",
-    "format_rise_reason_report",
-    "format_strategy_assessments",
-    "overlay_realtime_quotes",
-    "parse_google_news_rss",
-    "select_chart_window",
-]
+from importlib import import_module
+
+
+_EXPORTS = {
+    "ChartDisplayOptions": (".chart_options", "ChartDisplayOptions"),
+    "LABEL_TO_TIMEFRAME": (".chart_options", "LABEL_TO_TIMEFRAME"),
+    **{name: (".charts", name) for name in (
+        "DEFAULT_PROFILE_BINS", "MAX_PROFILE_BINS", "MIN_PROFILE_BINS", "build_chart_figure",
+    )},
+    **{name: (".classic_strategies", name) for name in (
+        "ALEXANDER_ELDER", "ALL_STRATEGIES", "ELLIOTT_WAVE", "JESSE_LIVERMORE",
+        "STRATEGY_OPTIONS", "ClassicStrategyAssessment", "assess_classic_strategies",
+        "format_strategy_assessments",
+    )},
+    **{name: (".data", name) for name in (
+        "DAILY_GAINER_SCREEN_TYPES", "DATA_SOURCE_MODES", "DATABASE_SOURCE_MODE",
+        "INDEX_RELATED_SCREEN_TYPES", "INDEX_WEEKLY_SCREEN_TYPES", "MARKET_GAINER_DEFINITIONS",
+        "MARKET_GAINER_SCREEN_TYPES", "MARKET_RESULT_SCREEN_TYPES", "MARKET_TRADING_VALUE_SCREEN_TYPES",
+        "REALTIME_SOURCE_MODE", "SCREEN_TITLES", "WEEKLY_SCREEN_TYPES", "ChartDataset",
+        "ScreenDataset", "WorkstationData", "build_index_gainer_rows", "build_index_weekly_gainer_rows",
+        "build_market_gainer_rows", "build_market_trading_value_rows", "calculate_volume_profile",
+        "describe_screen_freshness", "overlay_realtime_quotes", "select_chart_window",
+    )},
+    **{name: (".rise_reason", name) for name in (
+        "GoogleNewsItem", "RiseReasonLookupError", "RiseReasonReport", "build_google_news_query",
+        "build_google_news_urls", "fetch_google_rise_reason", "format_rise_reason_report",
+        "parse_google_news_rss",
+    )},
+    "TIMEFRAME_LABELS": (".on_demand", "TIMEFRAME_LABELS"),
+}
+
+__all__ = tuple(_EXPORTS)
+
+
+def __getattr__(name: str):
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = target
+    value = getattr(import_module(module_name, __name__), attribute)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted((*globals(), *__all__))
