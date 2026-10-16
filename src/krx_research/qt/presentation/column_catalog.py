@@ -93,6 +93,14 @@ COLUMN_LABELS: dict[str, str] = {
     "wave3_progress_vs_wave1": "추정 3파/1파 진행 배수",
     "volume_5d_vs_20d": "5일/20일 평균 거래량 배수",
     "weekly_trading_value": "주간 거래대금(원)",
+    "similarity_pct": "종합 유사도(%)",
+    "price_similarity_pct": "주가 유사도(%)",
+    "moving_average_similarity_pct": "이동평균 유사도(%)",
+    "volume_similarity_pct": "거래량 유사도(%)",
+    "moving_average": "이동평균 설정",
+    "db_recent_date": "DB 최근일",
+    "rise_pct": "최근일 상승률(%)",
+    "market_cap_eok": "시가총액(억원)",
 }
 
 SCREEN_BASE_COLUMNS = (

@@ -238,6 +238,7 @@ logs/
 log/
 LOGS/
 assistant_workspace/runs/
+.local_cache/pattern_vectors/
 *.tmp
 *.bak
 *.zip

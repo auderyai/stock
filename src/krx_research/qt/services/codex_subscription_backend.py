@@ -19,7 +19,7 @@ class CodexSubscriptionBackend:
                 "search_research_archive", "run_one_off_python", "list_reusable_python",
                 "run_one_off_query_python",
                 "run_reusable_python", "run_numbered_screen", "get_last_screen_result",
-                "request_chart", "finish",
+                "search_similar_patterns", "request_chart", "finish",
             ]},
             "arguments": {"type": "string", "description": "선택한 도구 인수의 JSON 객체 문자열"},
             "answer": {"type": "string"},
