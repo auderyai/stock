@@ -52,6 +52,8 @@ class StockDriveWorkflowTests(unittest.TestCase):
 
         self.assertIn('workflows: ["Stock daily DB update to Google Drive"]', workflow)
         self.assertIn("github.event.workflow_run.conclusion == 'failure'", workflow)
+        self.assertIn("Detect trusted code-failure artifact", workflow)
+        self.assertIn("needs.classify.outputs.code_error == 'true'", workflow)
         self.assertIn("issues: write", workflow)
         self.assertIn("gh issue create", workflow)
         self.assertIn("github.event.workflow_run.html_url", workflow)
@@ -78,7 +80,8 @@ class StockDriveWorkflowTests(unittest.TestCase):
         self.assertNotIn('"status": "provider-failed"', workflow)
         self.assertIn("steps.run.outputs.code == '75'", workflow)
         self.assertIn("proceed=false", workflow)
-        self.assertIn("if: failure()", workflow)
+        self.assertIn("exit 75", workflow)
+        self.assertIn("steps.run.outputs.code != '75'", workflow)
         self.assertNotIn('exit "$code"', workflow)
 
     def test_manual_run_continues_from_selected_checkpoint(self) -> None:
@@ -102,7 +105,7 @@ class StockDriveWorkflowTests(unittest.TestCase):
 
         self.assertIn("Codex 자동 수정은 호출하지 않습니다", stage)
         self.assertIn("workflow_run.conclusion == 'failure'", repair)
-        self.assertNotIn("provider", repair.lower())
+        self.assertIn("code_error", repair)
 
     def test_repair_agent_has_a_bounded_edit_surface(self) -> None:
         validator = (ROOT / "scripts/validate_stock_drive_repair.py").read_text(

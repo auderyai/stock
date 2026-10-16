@@ -71,12 +71,26 @@ class Menu7RepairTests(unittest.TestCase):
         repository = _Repository()
         repository.latest_market_date = lambda: self.fail("local latest-date dependency")
         repository.stock_trade_dates_by_code = lambda *_: self.fail("local price dependency")
-        report = XingDbMenuService(_TransientBridge(), repository).run_menu7(
+        bridge = _TransientBridge()
+        original = bridge.raw_tr
+        bridge.raw_tr = lambda tr, values: (
+            self.fail("menu7 must reuse the menu5 cloud universe")
+            if tr == "t8436" else original(tr, values)
+        )
+        report = XingDbMenuService(bridge, repository).run_menu7(
             start=DAY, end=DAY, include_investor=False, independent_target=True
         )
 
         self.assertTrue(report.passed)
         self.assertEqual(4, len(repository.completed))
+
+    def test_independent_target_requires_menu5_universe(self) -> None:
+        repository = _Repository()
+        repository.list_cloud_stock_codes = lambda *_: []
+        with self.assertRaisesRegex(ValueError, "메뉴 5 완료 후"):
+            XingDbMenuService(_TransientBridge(), repository).run_menu7(
+                start=DAY, end=DAY, include_investor=False, independent_target=True
+            )
 
     def test_repairs_only_unresolved_stock_and_venue_pairs(self) -> None:
         repository = _Repository()

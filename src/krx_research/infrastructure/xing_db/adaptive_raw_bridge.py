@@ -22,9 +22,10 @@ class DataProviderUnavailableError(RuntimeError):
 
 
 class AdaptiveRawTrBridge:
-    """LS OpenAPI primary for t1702/t8451; lazy Xing fallback for every failure."""
+    """LS OpenAPI primary for cloud TRs; lazy Xing fallback for every failure."""
 
     _API = {
+        "t8436": ("/stock/etc", "t8436InBlock", "t8436OutBlock"),
         "t1702": ("/stock/frgr-itt", "t1702InBlock", "t1702OutBlock1"),
         "t8451": ("/stock/chart", "t8451InBlock", "t8451OutBlock1"),
     }
@@ -52,7 +53,7 @@ class AdaptiveRawTrBridge:
     def connect(self) -> None:
         try:
             self._authorize()
-            self._enabled = True; self._emit("[LS OPENAPI] t1702/t8451 primary 연결 완료 (1 TR/sec)")
+            self._enabled = True; self._emit("[LS OPENAPI] t8436/t1702/t8451 연결 완료 (1 TR/sec)")
         except Exception as exc:
             detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
             self._enabled = False

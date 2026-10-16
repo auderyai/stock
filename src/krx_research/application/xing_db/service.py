@@ -348,11 +348,9 @@ class XingDbMenuService:
             raise ValueError(f"지원하지 않는 거래시장: {', '.join(invalid)}")
         started = dt.datetime.now()
         if independent_target:
-            count = self._repo.replace_cloud_stock_universe(
-                self._rows("t8436", {"gubun": "0"})
-            )
-            self._emit(progress, f"클라우드 독립 종목 목록 {count:,}건 갱신")
             codes = self._repo.list_cloud_stock_codes(ticker, max_tickers)
+            if not codes:
+                raise ValueError("클라우드 종목 목록이 없습니다. 메뉴 5 완료 후 메뉴 7을 실행하십시오.")
         else:
             codes = self._repo.list_stock_codes(ticker, max_tickers)
         venue_names = tuple(v.upper() for v in venues)

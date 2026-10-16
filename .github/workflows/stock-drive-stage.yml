@@ -129,13 +129,14 @@ jobs:
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Stock Drive 공급원·네트워크 오류: ${{ inputs.target_date || 'KST 자동 기준일' }}" \
             --body "정해진 2회 재시도 후에도 공급원 오류가 계속되었습니다. 완료 데이터와 체크포인트는 보존했으며 Codex 자동 수정은 호출하지 않습니다. 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          exit 75
       - name: Fail on actual code error
         if: steps.run.outputs.code != '0' && steps.run.outputs.code != '75'
         env:
           CODE: ${{ steps.run.outputs.code }}
         run: exit "$CODE"
       - name: Preserve code failure context
-        if: failure()
+        if: always() && steps.run.outputs.code != '0' && steps.run.outputs.code != '75'
         uses: actions/upload-artifact@v4
         with:
           name: stock-drive-code-failure-context-${{ github.run_id }}

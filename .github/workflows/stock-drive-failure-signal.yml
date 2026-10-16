@@ -13,8 +13,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  signal:
+  classify:
     if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      code_error: ${{ steps.artifact.outputs.code_error }}
+    steps:
+      - name: Detect trusted code-failure artifact
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          name="stock-drive-code-failure-context-$RUN_ID"
+          count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq "[.artifacts[] | select(.name == \"$name\")] | length")
+          [[ "$count" == "1" ]] && value=true || value=false
+          echo "code_error=$value" >> "$GITHUB_OUTPUT"
+
+  signal:
+    needs: classify
+    if: needs.classify.outputs.code_error == 'true'
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -35,7 +56,7 @@ jobs:
 
   repair:
     needs: signal
-    if: github.event.workflow_run.conclusion == 'failure'
+    if: needs.signal.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

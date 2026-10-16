@@ -55,6 +55,23 @@ class _ExpiredTokenSession:
         pass
 
 
+class _UniverseSession:
+    def __init__(self) -> None:
+        self.request = None
+
+    def post(self, url, **kwargs):
+        if url.endswith("/oauth2/token"):
+            return _JsonResponse(200, {"access_token": "token"})
+        self.request = (url, kwargs)
+        return _JsonResponse(200, {
+            "rsp_cd": "00000",
+            "t8436OutBlock": [{"shcode": "005930", "hname": "삼성전자"}],
+        })
+
+    def close(self) -> None:
+        pass
+
+
 class AdaptiveBridgeTests(unittest.TestCase):
     def test_cloud_mode_does_not_attempt_xing_fallback(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
@@ -94,6 +111,19 @@ class AdaptiveBridgeTests(unittest.TestCase):
             self.assertEqual([{"date": "20261012"}], result["rows"])
             self.assertEqual(2, session.token_requests)
             self.assertEqual(2, session.data_requests)
+
+    def test_cloud_stock_universe_uses_openapi_without_xing(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            root = Path(name); (root / "src" / "krx_research").mkdir(parents=True)
+            session = _UniverseSession()
+            bridge = AdaptiveRawTrBridge(
+                root, session=session, credential_loader=lambda _root: ("key", "secret"),
+                fallback_allowed=False, sleep_fn=lambda _seconds: None,
+                clock_fn=lambda: 1.0, progress=lambda _message: None,
+            )
+            bridge.connect(); result = bridge.raw_tr("t8436", {"gubun": "0"})
+            self.assertEqual("005930", result["rows"][0]["shcode"])
+            self.assertTrue(session.request[0].endswith("/stock/etc"))
 
 
 if __name__ == "__main__":
