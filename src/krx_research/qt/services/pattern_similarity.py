@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from krx_research.database import open_research_store
+from .pattern_policy import TrendAssessment, UptrendPolicy
 
 
 class MovingAverageKind(StrEnum):
@@ -351,8 +352,10 @@ class PatternSimilarity:
 class PatternSimilaritySearchService:
     """Orchestrates one complete, local and reproducible cross-stock search."""
 
-    def __init__(self, repository: PatternRepository, cache: PatternVectorCache | None = None):
+    def __init__(self, repository: PatternRepository, cache: PatternVectorCache | None = None,
+                 trend_policy: UptrendPolicy | None = None):
         self.repository, self.cache = repository, cache
+        self.trend_policy = trend_policy or UptrendPolicy()
 
     def suggest_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]:
         return self.repository.search_securities(query, limit)
@@ -372,6 +375,11 @@ class PatternSimilaritySearchService:
         reference = vectorizer.vectorize(reference_groups[security.code], query.start, query.end)
         if reference is None:
             raise ValueError("기준 종목의 유효한 패턴 관측치가 부족합니다.")
+        reference_trend = self.trend_policy.assess(
+            reference_groups[security.code], reference.start, reference.end
+        )
+        if not reference_trend.accepted:
+            raise ValueError("지정 기간의 기준 종목이 상승 추세 조건을 충족하지 않습니다.")
         latest = self.repository.latest_date()
         recent_start = latest - timedelta(days=(reference.observations + max(query.averages.periods)) * 3)
         recent_history = self.repository.history(recent_start, latest)
@@ -398,13 +406,17 @@ class PatternSimilaritySearchService:
             if (candidate is None or candidate.end != latest or
                     candidate.observations < reference.observations * 0.8):
                 continue
+            trend = self.trend_policy.assess(frame, candidate.start, candidate.end)
+            if not trend.accepted:
+                continue
             scores = PatternSimilarity.compare(reference, candidate)
-            matches.append((scores["similarity"], code, str(frame.stock_name.iloc[-1]), scores))
+            matches.append((scores["similarity"], code, str(frame.stock_name.iloc[-1]), scores, trend))
         matches.sort(reverse=True)
         selected = matches[: query.top_n]
-        snapshots = self.repository.latest([code for _, code, _, _ in selected])
-        return [self._row(code, name, scores, vectors[code][1], snapshots.get(code, {}), query)
-                for _, code, name, scores in selected]
+        snapshots = self.repository.latest([item[1] for item in selected])
+        return [self._row(code, name, scores, trend, vectors[code][1],
+                          snapshots.get(code, {}), query)
+                for _, code, name, scores, trend in selected]
 
     @staticmethod
     def _fingerprint(frame: pd.DataFrame) -> str:
@@ -412,8 +424,8 @@ class PatternSimilaritySearchService:
         return f"{len(frame)}:{last.trade_date}:{last.close}:{last.volume}"
 
     @staticmethod
-    def _row(code: str, name: str, scores: dict, vector: PatternVector, snapshot: dict,
-             query: PatternSearchQuery) -> dict:
+    def _row(code: str, name: str, scores: dict, trend: TrendAssessment,
+             vector: PatternVector, snapshot: dict, query: PatternSearchQuery) -> dict:
         value = lambda key: snapshot.get(key)
         return {
             "stock_code": code,
@@ -430,6 +442,9 @@ class PatternSimilaritySearchService:
             "moving_average": f"{query.averages.kind.value} {','.join(map(str, query.averages.periods))}",
             "pattern_start": vector.start, "pattern_end": vector.end,
             "pattern_days": vector.observations,
+            "period_return_pct": round(trend.return_pct, 2),
+            "trend_slope_pct": round(trend.slope_pct, 4),
+            "range_position_pct": round(trend.range_position_pct, 2),
             "db_recent_date": value("trade_date"),
             "rise_pct": PatternSimilaritySearchService._round(value("rise_pct")),
             "close": value("close"), "open": value("open"),

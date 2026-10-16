@@ -13,7 +13,7 @@ class PatternResultPresenter:
     )
     EVIDENCE = (
         "moving_average", "pattern_start", "pattern_end", "pattern_days",
-        "period_return_pct", "period_range_pct",
+        "period_return_pct", "trend_slope_pct", "range_position_pct", "period_range_pct",
     )
     LATEST = (
         "db_recent_date", "rise_pct", "open", "high", "low", "close",

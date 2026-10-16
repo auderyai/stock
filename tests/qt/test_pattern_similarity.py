@@ -13,6 +13,7 @@ from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
     PatternSimilarity, PatternVector, PatternVectorCache, PatternVectorizer, Security,
 )
+from krx_research.qt.services.pattern_policy import UptrendPolicy
 
 
 class FakeRepository:
@@ -48,6 +49,14 @@ class FakeRepository:
 
 
 class PatternSimilarityTests(unittest.TestCase):
+    def test_uptrend_policy_excludes_flat_and_falling_prices(self):
+        dates = pd.bdate_range("2026-01-01", periods=30)
+        frame = lambda close: FakeRepository._frame("000001", "검사", dates, close)
+        policy = UptrendPolicy()
+        self.assertTrue(policy.assess(frame(np.linspace(100, 130, 30))).accepted)
+        self.assertFalse(policy.assess(frame(np.full(30, 100))).accepted)
+        self.assertFalse(policy.assess(frame(np.linspace(130, 100, 30))).accepted)
+
     def test_vectorizer_supports_user_selected_average(self):
         repository = FakeRepository()
         frame = repository.frame[repository.frame.stock_code == "078350"]
@@ -82,7 +91,7 @@ class PatternSimilarityTests(unittest.TestCase):
         )
         rows = PatternSimilaritySearchService(FakeRepository()).search(query)
         self.assertEqual(rows[0]["stock_code"], "000001")
-        self.assertGreater(rows[0]["similarity_pct"], rows[1]["similarity_pct"])
+        self.assertNotIn("000002", [row["stock_code"] for row in rows])
         self.assertEqual(rows[0]["moving_average"], "SMA 5,10,15")
         self.assertEqual(rows[0]["market_cap_eok"], 3000.0)
         self.assertEqual(rows[0]["trading_value_eok"], 120.0)
@@ -120,7 +129,9 @@ class PatternSimilarityTests(unittest.TestCase):
         repository = FakeRepository()
         reference_dates = pd.bdate_range("2026-04-01", periods=30)
         recent_dates = pd.bdate_range("2026-09-01", periods=30)
-        shape = 100 + np.sin(np.linspace(0, 5, len(reference_dates)))
+        shape = np.linspace(100, 130, len(reference_dates)) + np.sin(
+            np.linspace(0, 5, len(reference_dates))
+        )
         target = repository._frame("078350", "기준종목", reference_dates, shape)
         similar = repository._frame("000003", "유사종목", recent_dates, shape * .5)
         opposite = repository._frame("000004", "반대종목", recent_dates, shape[::-1])

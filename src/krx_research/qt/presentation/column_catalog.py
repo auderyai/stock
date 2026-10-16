@@ -106,6 +106,8 @@ COLUMN_LABELS: dict[str, str] = {
     "pattern_end": "패턴 종료일",
     "pattern_days": "패턴 거래일 수",
     "period_return_pct": "기간 수익률(%)",
+    "trend_slope_pct": "일평균 추세기울기(%)",
+    "range_position_pct": "구간 내 종가 위치(%)",
     "period_range_pct": "기간 고저폭(%)",
     "pattern_role": "구분",
 }
