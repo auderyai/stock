@@ -6,11 +6,11 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from .pattern_similarity import PatternRepository, PatternSimilarity
+from .pattern_similarity import PatternRepository, PatternSimilarity, TimeSeriesVectorizer
 
 
 @dataclass(frozen=True, slots=True)
-class BoxBreakoutQuery:
+class PeriodPatternQuery:
     security: str
     start: date
     end: date
@@ -20,99 +20,100 @@ class BoxBreakoutQuery:
         if not str(self.security).strip():
             raise ValueError("기준 종목을 입력하십시오.")
         if self.start >= self.end:
-            raise ValueError("박스권 시작일은 종료일보다 빨라야 합니다.")
+            raise ValueError("패턴 시작일은 종료일보다 빨라야 합니다.")
         if not 1 <= self.top_n <= 100:
             raise ValueError("검색 결과 수는 1~100이어야 합니다.")
 
 
 @dataclass(frozen=True, slots=True)
-class BoxPattern:
+class PeriodPattern:
     code: str
     name: str
-    breakout_date: date
-    box_high: float
-    box_low: float
-    width_pct: float
-    breakout_pct: float
-    volume_ratio: float
-    timing_ratio: float
-    path: np.ndarray
+    observations: int
+    channels: dict[str, np.ndarray]
+    return_pct: float
+    range_pct: float
 
 
-class BoxBreakoutSearchService:
-    """Learns one selected box-breakout pattern and ranks analogous stocks."""
+class PeriodPatternSearchService:
+    """Compares the user-selected period without inferring a breakout event."""
 
     def __init__(self, repository: PatternRepository):
         self.repository = repository
 
-    def search(self, query: BoxBreakoutQuery) -> list[dict]:
+    def search(self, query: PeriodPatternQuery) -> list[dict]:
         security = self.repository.resolve(query.security)
         history = self.repository.history(query.start, query.end)
         groups = {str(code): frame for code, frame in history.groupby("stock_code", sort=False)}
         reference = self._pattern(groups.get(security.code))
         if reference is None:
-            raise ValueError(f"{security.name}의 지정 기간에서 박스권 상단 돌파를 찾지 못했습니다.")
+            raise ValueError(f"{security.name}의 지정 기간 패턴 관측치가 부족합니다.")
         matches = []
         for code, frame in groups.items():
             if code == security.code:
                 continue
             candidate = self._pattern(frame)
-            if candidate:
-                price, feature = self._compare(reference, candidate)
-                matches.append((price * .7 + feature * .3, price, feature, candidate))
-        matches.sort(key=lambda item: item[0], reverse=True)
+            if candidate is None or candidate.observations < reference.observations * 0.8:
+                continue
+            scores = self._compare(reference, candidate)
+            matches.append((scores["similarity"], code, candidate, scores))
+        matches.sort(key=lambda item: (-item[0], item[1]))
         selected = matches[:query.top_n]
-        codes = [reference.code, *(item[3].code for item in selected)]
+        codes = [reference.code, *(item[2].code for item in selected)]
         snapshots = self.repository.latest(codes)
-        return [self._row(reference, snapshots.get(reference.code, {}), 100, 100, 100, "기준 패턴"),
-                *(self._row(item[3], snapshots.get(item[3].code, {}), item[0], item[1], item[2], "유사 패턴")
-                  for item in selected)]
+        perfect = {"similarity": 100, "price_similarity": 100, "volume_similarity": 100}
+        return [
+            self._row(reference, snapshots.get(reference.code, {}), query, perfect, "기준 패턴"),
+            *(self._row(item[2], snapshots.get(item[2].code, {}), query, item[3], "유사 패턴")
+              for item in selected),
+        ]
 
     @staticmethod
-    def _pattern(frame: pd.DataFrame | None) -> BoxPattern | None:
+    def _pattern(frame: pd.DataFrame | None) -> PeriodPattern | None:
         if frame is None:
             return None
-        data = frame.sort_values("trade_date").dropna(subset=["close", "high", "low", "volume"])
-        if len(data) < 21:
+        data = frame.sort_values("trade_date").drop_duplicates("trade_date")
+        data = data.dropna(subset=["close", "high", "low", "volume"])
+        if len(data) < 12:
             return None
-        highs, closes = data.high.to_numpy(dtype=float), data.close.to_numpy(dtype=float)
-        prior_highs = np.maximum.accumulate(highs)[:-1]
-        events = np.flatnonzero(closes[20:] > prior_highs[19:]) + 20
-        if not len(events):
-            return None
-        index = int(events[-1])
-        box, row, high = data.iloc[:index], data.iloc[index], float(prior_highs[index - 1])
-        low, average_volume = float(box.low.min()), float(box.volume.tail(20).mean())
-        path = np.interp(np.linspace(0, 1, 64), np.linspace(0, 1, len(closes)), closes / closes[0] - 1)
-        return BoxPattern(
-            str(row.stock_code), str(row.stock_name), row.trade_date.date(), high, low,
-            (high / low - 1) * 100, (float(row.close) / high - 1) * 100,
-            float(row.volume) / average_volume if average_volume > 0 else 0,
-            index / (len(data) - 1), path,
+        vectorizer = TimeSeriesVectorizer()
+        close = data.close.to_numpy(dtype=float)
+        channels = {
+            name: vectorizer.price(data[name].to_numpy(dtype=float))
+            for name in ("close", "high", "low")
+        }
+        channels["volume"] = vectorizer.volume(data.volume.to_numpy(dtype=float))
+        return PeriodPattern(
+            str(data.stock_code.iloc[-1]), str(data.stock_name.iloc[-1]), len(data), channels,
+            (close[-1] / close[0] - 1) * 100,
+            (float(data.high.max()) / float(data.low.min()) - 1) * 100,
         )
 
     @staticmethod
-    def _compare(reference: BoxPattern, candidate: BoxPattern) -> tuple[float, float]:
-        price = PatternSimilarity._score(reference.path, candidate.path)
-        left = np.array([reference.width_pct / 100, reference.breakout_pct / 30,
-                         np.log1p(reference.volume_ratio) / 3, reference.timing_ratio])
-        right = np.array([candidate.width_pct / 100, candidate.breakout_pct / 30,
-                          np.log1p(candidate.volume_ratio) / 3, candidate.timing_ratio])
-        return price, float(100 * np.exp(-2 * np.mean(np.abs(left - right))))
+    def _compare(reference: PeriodPattern, candidate: PeriodPattern) -> dict[str, float]:
+        price = np.mean([
+            PatternSimilarity._score(reference.channels[name], candidate.channels[name])
+            for name in ("close", "high", "low")
+        ])
+        volume = PatternSimilarity._score(reference.channels["volume"], candidate.channels["volume"])
+        return {"similarity": price * 0.85 + volume * 0.15,
+                "price_similarity": price, "volume_similarity": volume}
 
     @staticmethod
-    def _row(pattern: BoxPattern, snapshot: dict, total: float, price: float,
-             feature: float, role: str) -> dict:
+    def _row(pattern: PeriodPattern, snapshot: dict, query: PeriodPatternQuery,
+             scores: dict, role: str) -> dict:
         value = lambda key: snapshot.get(key)
         eok = lambda key: None if value(key) is None else round(float(value(key)) / 100_000_000, 2)
         return {
             "pattern_role": role, "stock_code": pattern.code,
             "stock_name": value("stock_name") or pattern.name,
-            "similarity_pct": round(total, 2), "price_similarity_pct": round(price, 2),
-            "box_similarity_pct": round(feature, 2), "breakout_date": pattern.breakout_date,
-            "box_high": round(pattern.box_high, 2), "box_low": round(pattern.box_low, 2),
-            "box_width_pct": round(pattern.width_pct, 2),
-            "breakout_pct": round(pattern.breakout_pct, 2), "volume_ratio": round(pattern.volume_ratio, 2),
+            "similarity_pct": round(scores["similarity"], 2),
+            "price_similarity_pct": round(scores["price_similarity"], 2),
+            "volume_similarity_pct": round(scores["volume_similarity"], 2),
+            "pattern_start": query.start, "pattern_end": query.end,
+            "pattern_days": pattern.observations,
+            "period_return_pct": round(pattern.return_pct, 2),
+            "period_range_pct": round(pattern.range_pct, 2),
             "db_recent_date": value("trade_date"), "rise_pct": value("rise_pct"),
             "close": value("close"), "market_cap_eok": eok("market_cap"),
             "trading_value_eok": eok("trading_value"),

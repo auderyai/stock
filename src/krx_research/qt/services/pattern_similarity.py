@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 from hashlib import sha256
+from itertools import combinations
 import json
 from pathlib import Path
 from typing import Protocol
@@ -27,8 +28,8 @@ class MovingAverageSpec:
 
     def __post_init__(self) -> None:
         periods = tuple(sorted(set(map(int, self.periods))))
-        if not periods or len(periods) > 6 or periods[0] < 2 or periods[-1] > 250:
-            raise ValueError("이동평균 기간은 2~250일에서 최대 6개까지 지정할 수 있습니다.")
+        if not periods or len(periods) > 8 or periods[0] < 2 or periods[-1] > 500:
+            raise ValueError("이동평균 기간은 2~500일에서 최대 8개까지 지정할 수 있습니다.")
         object.__setattr__(self, "kind", MovingAverageKind(str(self.kind).upper()))
         object.__setattr__(self, "periods", periods)
 
@@ -68,6 +69,7 @@ class PatternVector:
 
 class PatternRepository(Protocol):
     def resolve(self, security: str) -> Security: ...
+    def search_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]: ...
     def history(self, start: date, end: date) -> pd.DataFrame: ...
     def latest(self, codes: list[str]) -> dict[str, dict]: ...
 
@@ -121,6 +123,7 @@ class PatternVectorCache:
 
     def _path(self, query: PatternSearchQuery) -> Path:
         payload = json.dumps({
+            "version": 2,
             "start": query.start.isoformat(), "end": query.end.isoformat(),
             "kind": query.averages.kind.value, "periods": query.averages.periods,
             "price": query.include_price, "volume": query.include_volume,
@@ -151,6 +154,22 @@ class PostgreSQLPatternRepository:
         if len(rows) > 1 and not value.isdigit():
             raise ValueError(f"같은 종목명이 여러 개입니다. 종목코드를 입력하십시오: {value}")
         return Security(str(rows[0]["code"]), str(rows[0]["name"] or value))
+
+    def search_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]:
+        value, count = str(query).strip(), max(1, int(limit))
+        if not value:
+            return []
+        pattern = f"%{value}%"
+        rows = self._rows(
+            "SELECT btrim(ticker) ticker,COALESCE(name,'') name,COALESCE(market,'') market "
+            "FROM market.security_master WHERE btrim(ticker) ILIKE %s OR name ILIKE %s "
+            "ORDER BY CASE WHEN btrim(ticker)=%s OR name=%s THEN 0 "
+            "WHEN btrim(ticker) ILIKE %s OR name ILIKE %s THEN 1 ELSE 2 END,name,ticker LIMIT %s",
+            (pattern, pattern, value.zfill(6) if value.isdigit() else value,
+             value, f"{value}%", f"{value}%", count),
+        )
+        return [{key: str(row.get(key) or "") for key in ("ticker", "name", "market")}
+                for row in rows]
 
     def history(self, start: date, end: date) -> pd.DataFrame:
         rows = self._rows(
@@ -190,12 +209,38 @@ class PostgreSQLPatternRepository:
         return {str(row["stock_code"]): row for row in rows}
 
 
+class TimeSeriesVectorizer:
+    """Normalizes and resamples comparable time-series paths."""
+
+    def __init__(self, points: int = 64):
+        self.points = int(points)
+
+    def price(self, values) -> np.ndarray:
+        values = np.asarray(values, dtype=float)
+        base = values[0]
+        if not np.isfinite(base) or base == 0:
+            raise ValueError("패턴 기준값이 유효하지 않습니다.")
+        return self.resample(values / base - 1.0)
+
+    def volume(self, values) -> np.ndarray:
+        values = np.log1p(np.maximum(np.asarray(values, dtype=float), 0))
+        scale = values.std()
+        standardized = values - values.mean() if scale == 0 else (values - values.mean()) / scale
+        return self.resample(standardized)
+
+    def resample(self, values) -> np.ndarray:
+        values = np.asarray(values, dtype=float)
+        return np.interp(
+            np.linspace(0.0, 1.0, self.points), np.linspace(0.0, 1.0, len(values)), values
+        )
+
+
 class PatternVectorizer:
-    """Converts price, moving-average and volume paths into fixed-size vectors."""
+    """Converts price, moving-average, gap and volume paths into fixed-size vectors."""
 
     def __init__(self, spec: MovingAverageSpec, *, points: int = 64,
                  include_price: bool = True, include_volume: bool = False):
-        self.spec, self.points = spec, int(points)
+        self.spec, self.path = spec, TimeSeriesVectorizer(points)
         self.include_price, self.include_volume = include_price, include_volume
 
     def vectorize(self, frame: pd.DataFrame, start: date, end: date) -> PatternVector | None:
@@ -216,9 +261,14 @@ class PatternVectorizer:
         channels: dict[str, np.ndarray] = {}
         for column in columns:
             values = view[column].to_numpy(dtype=float)
-            channels[column] = self._resample(
-                self._standardize_volume(values) if column == "volume" else self._normalize(values)
-            )
+            channels[column] = self.path.volume(values) if column == "volume" else self.path.price(values)
+        close = view["close"].to_numpy(dtype=float)
+        for period in self.spec.periods:
+            average = view[f"ma_{period}"].to_numpy(dtype=float)
+            channels[f"gap_close_{period}"] = self.path.resample(average / close - 1.0)
+        for short, long in combinations(self.spec.periods, 2):
+            left, right = view[f"ma_{short}"].to_numpy(dtype=float), view[f"ma_{long}"].to_numpy(dtype=float)
+            channels[f"gap_{short}_{long}"] = self.path.resample(left / right - 1.0)
         return PatternVector(channels, len(view))
 
     def _average(self, series: pd.Series, period: int) -> pd.Series:
@@ -228,24 +278,6 @@ class PatternVectorizer:
             weights = np.arange(1, period + 1, dtype=float)
             return series.rolling(period).apply(lambda values: np.dot(values, weights) / weights.sum(), raw=True)
         return series.rolling(period).mean()
-
-    @staticmethod
-    def _normalize(values: np.ndarray) -> np.ndarray:
-        base = values[0]
-        if not np.isfinite(base) or base == 0:
-            raise ValueError("패턴 기준값이 유효하지 않습니다.")
-        return values / base - 1.0
-
-    @staticmethod
-    def _standardize_volume(values: np.ndarray) -> np.ndarray:
-        values = np.log1p(np.maximum(values, 0))
-        scale = values.std()
-        return values - values.mean() if scale == 0 else (values - values.mean()) / scale
-
-    def _resample(self, values: np.ndarray) -> np.ndarray:
-        source = np.linspace(0.0, 1.0, len(values))
-        return np.interp(np.linspace(0.0, 1.0, self.points), source, values)
-
 
 class PatternSimilarity:
     """Scores channel shapes without hiding the component evidence."""
@@ -259,14 +291,19 @@ class PatternSimilarity:
         price = scores.get("close")
         volume = scores.get("volume")
         averages = [score for name, score in scores.items() if name.startswith("ma_")]
-        parts = [(price, 0.45), (sum(averages) / len(averages) if averages else None, 0.45),
-                 (volume, 0.10)]
+        gaps = [score for name, score in scores.items() if name.startswith("gap_")]
+        shape = sum(averages) / len(averages) if averages else None
+        gap = sum(gaps) / len(gaps) if gaps else None
+        moving_average = np.mean([value for value in (shape, gap) if value is not None])
+        parts = [(price, 0.45), (moving_average, 0.45), (volume, 0.10)]
         active = [(value, weight) for value, weight in parts if value is not None]
         total = sum(weight for _, weight in active)
         return {
             "similarity": sum(value * weight for value, weight in active) / total,
             "price_similarity": price,
-            "moving_average_similarity": sum(averages) / len(averages) if averages else None,
+            "moving_average_similarity": moving_average,
+            "moving_average_shape_similarity": shape,
+            "moving_average_gap_similarity": gap,
             "volume_similarity": volume,
         }
 
@@ -285,6 +322,9 @@ class PatternSimilaritySearchService:
 
     def __init__(self, repository: PatternRepository, cache: PatternVectorCache | None = None):
         self.repository, self.cache = repository, cache
+
+    def suggest_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]:
+        return self.repository.search_securities(query, limit)
 
     def search(self, query: PatternSearchQuery) -> list[dict]:
         security = self.repository.resolve(query.security)
@@ -344,6 +384,9 @@ class PatternSimilaritySearchService:
             "price_similarity_pct": PatternSimilaritySearchService._round(scores["price_similarity"]),
             "moving_average_similarity_pct": PatternSimilaritySearchService._round(
                 scores["moving_average_similarity"]
+            ),
+            "moving_average_gap_similarity_pct": PatternSimilaritySearchService._round(
+                scores["moving_average_gap_similarity"]
             ),
             "volume_similarity_pct": PatternSimilaritySearchService._round(scores["volume_similarity"]),
             "moving_average": f"{query.averages.kind.value} {','.join(map(str, query.averages.periods))}",

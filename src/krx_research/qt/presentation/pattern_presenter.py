@@ -9,11 +9,11 @@ class PatternResultPresenter:
     IDENTITY = ("rank", "stock_code", "stock_name")
     SIMILARITY = (
         "similarity_pct", "price_similarity_pct", "moving_average_similarity_pct",
-        "volume_similarity_pct", "box_similarity_pct",
+        "moving_average_gap_similarity_pct", "volume_similarity_pct",
     )
     EVIDENCE = (
-        "moving_average", "breakout_date", "box_high", "box_low", "box_width_pct",
-        "breakout_pct", "volume_ratio",
+        "moving_average", "pattern_start", "pattern_end", "pattern_days",
+        "period_return_pct", "period_range_pct",
     )
     LATEST = (
         "db_recent_date", "rise_pct", "open", "high", "low", "close",

@@ -77,6 +77,7 @@ def _elliott_wave(daily: DataFrame) -> ClassicStrategyAssessment:
     else:
         state = "파동 전환 확인"
     detail = (
+        f"계산 기준일 {daily.index[-1]:%Y-%m-%d}; 현재 종가를 기준으로 "
         f"20일 {_format_percentage(return20)}, 60일 {_format_percentage(return60)}, "
         f"60일 고점 대비 {_format_percentage(drawdown)}; 파동 번호는 확정하지 않습니다."
     )
@@ -118,7 +119,7 @@ def _jesse_livermore(daily: DataFrame) -> ClassicStrategyAssessment:
         state = "중립"
     breakout_text = "돌파" if breakout else "미돌파"
     detail = (
-        f"52주 이전 고점 {breakout_text}, 거래량은 20일 평균의 "
+        f"계산 기준일 {daily.index[-1]:%Y-%m-%d}; 52주 이전 고점 {breakout_text}, 거래량은 20일 평균의 "
         f"{volume_ratio:.2f}배, 종가/EMA33/EMA56 추세를 함께 판정했습니다."
     )
     return ClassicStrategyAssessment(JESSE_LIVERMORE, state, detail)
@@ -175,7 +176,7 @@ def _alexander_elder(daily: DataFrame, weekly: DataFrame) -> ClassicStrategyAsse
         state = "중립"
     direction = "상승" if weekly_rising else "하락"
     detail = (
-        f"주봉 MACD 오실레이터 {direction}, 일봉 Slow %K {current_k:.1f}, "
+        f"계산 기준일 {daily.index[-1]:%Y-%m-%d}; 주봉 MACD 오실레이터 {direction}, 일봉 Slow %K {current_k:.1f}, "
         f"%D {current_d:.1f}입니다."
     )
     return ClassicStrategyAssessment(ALEXANDER_ELDER, state, detail)

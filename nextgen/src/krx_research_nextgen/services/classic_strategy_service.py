@@ -59,7 +59,18 @@ class ClassicStrategyService:
         return None
 
     @staticmethod
-    def _elliott_detail(points, direction: str) -> str:
+    def _elliott_current_state(points, direction: str, daily: pd.DataFrame) -> str:
+        p4, p5, latest = points[4][1], points[5][1], float(daily.close.iloc[-1])
+        if direction == "상승":
+            return ("5파 후보 고점 위에서 상승 연장 확인 중" if latest > p5 else
+                    "5파 후보 고점 아래·4파 저점 위에서 조정 여부 확인 중" if latest >= p4 else
+                    "4파 저점 아래로 내려 상승 5파 후보가 약화됨")
+        return ("A/C 내부 저점 아래에서 하락 연장 확인 중" if latest < p5 else
+                "내부 저점 위·직전 반등 고점 아래에서 반등 여부 확인 중" if latest <= p4 else
+                "직전 반등 고점을 회복해 하락 A/C 내부 구조가 약화됨")
+
+    @staticmethod
+    def _elliott_detail(points, direction: str, daily: pd.DataFrame) -> str:
         prices = [point[1] for point in points]
         p0, p1, p2, p3, p4, p5 = prices
         lengths = {1: abs(p1 - p0), 3: abs(p3 - p2), 5: abs(p5 - p4)}
@@ -84,7 +95,13 @@ class ClassicStrategyService:
                       "A파 또는 C파 내부 구조의 기본 가격 규칙을 통과한 후보일 뿐, A-B-C 위치·조정 완료·반전을 확정하지 않습니다.")
         fifth = (f"3파 끝을 {abs(fifth_margin):,.0f}원 넘어 새 극값 형성" if fifth_margin > 0 else
                  f"3파 끝을 넘지 못한 절단 5파 가능성({abs(fifth_margin):,.0f}원 차이)")
-        return (f"확인 구간: {points[0][0]:%Y-%m-%d} ~ {points[-1][0]:%Y-%m-%d}\n"
+        latest_date, latest_close = daily.index[-1], float(daily.close.iloc[-1])
+        days_after = int((daily.index > points[-1][0]).sum())
+        current = ClassicStrategyService._elliott_current_state(points, direction, daily)
+        return (f"최근 기준일: {latest_date:%Y-%m-%d}, 종가 {latest_close:,.0f}원\n"
+                f"현재 상황: {current}\n"
+                f"최근 확정 파동점 이후: {days_after}거래일\n"
+                f"확인 구간: {points[0][0]:%Y-%m-%d} ~ {points[-1][0]:%Y-%m-%d}\n"
                 f"{layout_title}: {turns}\n"
                 f"① 2파 규칙: 1파 시작점을 넘지 않음, 여유 {wave2_margin:,.0f}원 → 통과\n"
                 f"② 3파 규칙: 1파 {lengths[1]:,.0f}원, 3파 {lengths[3]:,.0f}원, "
@@ -98,25 +115,22 @@ class ClassicStrategyService:
                 "파동 차수, 조정 형태와 대안 파동 수.\n"
                 f"최종 해석: {conclusion}")
 
-    @staticmethod
-    def _elliott_state(direction: str) -> str:
-        return ("하락 조정 A파 또는 C파 후보·상위 구조 미확정" if direction == "하락" else
-                "상승 동인 5파 후보·상위 차수 미확정")
-
     def _elliott(self, daily: pd.DataFrame) -> StrategyAssessment:
         name = "엘리어트 파동"; swings = self._swings(daily)
-        for end in range(len(swings), 5, -1):
-            points, direction = swings[end - 6:end], self._impulse(swings[end - 6:end])
-            if direction:
-                labels = tuple((date, price,
-                                ("A/C 시작" if index == 0 else f"A/C-{index}") if direction == "하락"
-                                else "시작" if index == 0 else str(index))
-                               for index, (date, price, _) in enumerate(points))
-                return self._item(name, self._elliott_state(direction),
-                                  self._elliott_detail(points, direction), labels)
-        return self._item(name, "동인 5파 기본규칙 미충족",
-                          "검사 범위: 최근 확정된 고점과 저점을 6개씩 묶어 동인 5파의 세 가지 필수 가격 규칙을 확인했습니다.\n"
-                          "결과: 세 규칙을 동시에 만족하는 상승 또는 하락 동인 5파 후보를 찾지 못했습니다.\n"
+        points = swings[-6:]
+        direction = self._impulse(points) if len(points) == 6 else None
+        if direction:
+            labels = tuple((date, price,
+                            ("A/C 시작" if index == 0 else f"A/C-{index}") if direction == "하락"
+                            else "시작" if index == 0 else str(index))
+                           for index, (date, price, _) in enumerate(points))
+            return self._item(name, self._elliott_current_state(points, direction, daily),
+                              self._elliott_detail(points, direction, daily), labels)
+        basis = f"{daily.index[-1]:%Y-%m-%d}" if not daily.empty else "자료 없음"
+        return self._item(name, "최근 기준일 파동 규칙 미충족",
+                          f"최근 기준일: {basis}\n"
+                          "검사 범위: 가장 최근에 확정된 고점과 저점 6개만 사용해 동인 5파의 세 가지 필수 가격 규칙을 확인했습니다.\n"
+                          "결과: 최근 구조는 세 규칙을 동시에 만족하지 않습니다. 과거에 끝난 유효 구간으로 대신 판정하지 않았습니다.\n"
                           "해석 제한: 조정파는 3파 또는 그 조합이며 별도의 내부 구조 분석이 필요합니다. 이 결과만으로 파동이 없다고 단정할 수 없습니다.")
 
     def _livermore(self, daily: pd.DataFrame) -> StrategyAssessment:

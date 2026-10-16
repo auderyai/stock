@@ -7,11 +7,11 @@ import numpy as np
 import pandas as pd
 
 from krx_research.qt.services.assistant_service import AssistantService
-from krx_research.qt.services.box_breakout import BoxBreakoutQuery, BoxBreakoutSearchService
+from krx_research.qt.services.box_breakout import PeriodPatternQuery, PeriodPatternSearchService
 from krx_research.qt.services.codex_subscription_backend import CodexSubscriptionBackend
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
-    PatternVector, PatternVectorCache, PatternVectorizer, Security,
+    PatternSimilarity, PatternVector, PatternVectorCache, PatternVectorizer, Security,
 )
 
 
@@ -33,6 +33,9 @@ class FakeRepository:
                              "volume": np.linspace(1000, 2000, len(dates))})
 
     def resolve(self, _security): return Security("078350", "한양디지텍")
+    def search_securities(self, query, limit=20):
+        rows = [{"ticker": "078350", "name": "한양디지텍", "market": "KOSDAQ"}]
+        return [row for row in rows if query in row["ticker"] or query in row["name"]][:limit]
     def history(self, start, end):
         return self.frame[self.frame.trade_date.between(pd.Timestamp(start), pd.Timestamp(end))]
     def latest(self, codes):
@@ -50,8 +53,26 @@ class PatternSimilarityTests(unittest.TestCase):
         vector = PatternVectorizer(MovingAverageSpec(MovingAverageKind.EMA, (5, 10, 15))).vectorize(
             frame, date(2026, 2, 2), date(2026, 5, 15)
         )
-        self.assertEqual(set(vector.channels), {"close", "ma_5", "ma_10", "ma_15"})
+        self.assertEqual(set(vector.channels), {
+            "close", "ma_5", "ma_10", "ma_15", "gap_close_5", "gap_close_10",
+            "gap_close_15", "gap_5_10", "gap_5_15", "gap_10_15",
+        })
         self.assertTrue(all(len(values) == 64 for values in vector.channels.values()))
+
+    def test_eight_average_periods_are_supported_and_nine_are_rejected(self):
+        periods = (5, 10, 15, 33, 56, 112, 224, 448)
+        self.assertEqual(MovingAverageSpec(MovingAverageKind.EMA, periods).periods, periods)
+        with self.assertRaisesRegex(ValueError, "최대 8개"):
+            MovingAverageSpec(MovingAverageKind.EMA, (*periods, 500))
+
+    def test_moving_average_gap_is_part_of_similarity(self):
+        line = np.linspace(0, 0.1, 64)
+        reference = PatternVector({"ma_5": line, "gap_5_20": np.zeros(64)}, 64)
+        candidate = PatternVector({"ma_5": line, "gap_5_20": np.full(64, 0.1)}, 64)
+        scores = PatternSimilarity.compare(reference, candidate)
+        self.assertEqual(scores["moving_average_shape_similarity"], 100)
+        self.assertLess(scores["moving_average_gap_similarity"], 100)
+        self.assertLess(scores["moving_average_similarity"], 100)
 
     def test_search_ranks_matching_shape_and_adds_latest_facts(self):
         query = PatternSearchQuery(
@@ -79,21 +100,22 @@ class PatternSimilarityTests(unittest.TestCase):
         self.assertEqual(loaded["000001"][1].observations, 70)
         self.assertIsNone(loaded["000002"][1])
 
-    def test_box_breakout_requires_price_and_volume_confirmation(self):
+    def test_period_pattern_does_not_infer_a_breakout_event(self):
         repository = FakeRepository()
         dates = pd.bdate_range("2026-09-01", periods=30)
-        target = repository._frame("078350", "기준종목", dates, np.r_[np.full(29, 100), 105])
-        target.loc[target.index[-1], "volume"] = 5000
-        breakout = repository._frame("000003", "유사종목", dates, np.r_[np.full(29, 50), 52.5])
-        breakout.loc[breakout.index[-1], "volume"] = 2500
-        failed = repository._frame("000004", "미돌파", dates, np.full(30, 100))
-        repository.frame = pd.concat([target, breakout, failed], ignore_index=True)
-        rows = BoxBreakoutSearchService(repository).search(BoxBreakoutQuery(
-            "078350", dates[0].date(), dates[-1].date(), top_n=10,
+        shape = 100 + np.sin(np.linspace(0, 5, len(dates)))
+        target = repository._frame("078350", "기준종목", dates, shape)
+        similar = repository._frame("000003", "유사종목", dates, shape * .5)
+        opposite = repository._frame("000004", "반대종목", dates, shape[::-1])
+        repository.frame = pd.concat([target, similar, opposite], ignore_index=True)
+        rows = PeriodPatternSearchService(repository).search(PeriodPatternQuery(
+            "078350", dates[0].date(), dates[-1].date(), top_n=1,
         ))
         self.assertEqual([row["stock_code"] for row in rows], ["078350", "000003"])
         self.assertEqual(rows[0]["pattern_role"], "기준 패턴")
-        self.assertGreater(rows[0]["breakout_pct"], 1)
+        self.assertNotIn("breakout_date", rows[0])
+        self.assertEqual(rows[0]["pattern_start"], dates[0].date())
+        self.assertEqual(rows[0]["pattern_end"], dates[-1].date())
 
     def test_assistant_routes_pattern_search_to_registered_service(self):
         class Search:

@@ -2,6 +2,8 @@ from __future__ import annotations
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout
 
+from .security_completer import SecurityCompleter
+
 
 class SecuritySearchPanel(QGroupBox):
     searchRequested = Signal(str)
@@ -14,6 +16,7 @@ class SecuritySearchPanel(QGroupBox):
         layout = QVBoxLayout(self)
         row = QHBoxLayout(); layout.addLayout(row)
         self.query = QLineEdit(); self.query.setPlaceholderText("종목명 또는 6자리 종목코드")
+        self.completer = SecurityCompleter(self.query, self)
         self.search_button = QPushButton("종목 찾기")
         row.addWidget(self.query, 1); row.addWidget(self.search_button)
         self.results = QListWidget(); self.results.setMaximumHeight(110); layout.addWidget(self.results)
@@ -22,6 +25,7 @@ class SecuritySearchPanel(QGroupBox):
         self.chart_button = QPushButton("차트 열기"); self.compare_button = QPushButton("유사배열 기준종목으로 사용")
         buttons.addWidget(self.chart_button); buttons.addWidget(self.compare_button)
         self.search_button.clicked.connect(self._search); self.query.returnPressed.connect(self._search)
+        self.completer.searchRequested.connect(self.searchRequested)
         self.chart_button.clicked.connect(lambda: self._emit_selected(self.chartRequested))
         self.compare_button.clicked.connect(lambda: self._emit_selected(self.comparisonRequested))
         self.results.itemDoubleClicked.connect(lambda _item: self._emit_selected(self.chartRequested))
@@ -31,6 +35,7 @@ class SecuritySearchPanel(QGroupBox):
         if text: self.searchRequested.emit(text)
 
     def set_matches(self, rows: list[dict[str, str]]) -> None:
+        self.completer.set_matches(rows)
         self.results.clear(); self._matches.clear()
         for index, row in enumerate(rows):
             ticker = str(row.get("ticker", "")).zfill(6)

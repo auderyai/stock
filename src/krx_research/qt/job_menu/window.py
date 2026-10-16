@@ -6,15 +6,21 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import QDate, QTimer, Qt
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDateEdit, QDialog, QDialogButtonBox,
+    QApplication, QCheckBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPushButton, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from krx_research.application.job_menu.models import JobKind, JobRequest, LegacyJobSpec
+from krx_research.database import resolve_database_target
+from krx_research.qt.services.security_search_service import SecuritySearchService
+from krx_research.qt.widgets.calendar_date_edit import CalendarDateEdit
+from krx_research.qt.widgets.security_completer import SecurityCompleter
+from krx_research.ui.data import WorkstationData
 from .controller import JobMenuController
 
 
@@ -28,16 +34,20 @@ class UiJob:
 
 
 class RangeDialog(QDialog):
-    def __init__(self, title: str, *, menu: int, parent: QWidget | None = None) -> None:
+    def __init__(self, title: str, *, menu: int, security_search: Callable,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self._menu = menu
         today = QDate.currentDate()
-        self.start = QDateEdit(today.addDays(-7), calendarPopup=True)
-        self.end = QDateEdit(today, calendarPopup=True)
+        self.start = CalendarDateEdit(today.addDays(-7))
+        self.end = CalendarDateEdit(today)
         self.start.setMaximumDate(today); self.end.setMaximumDate(today)
         self.ticker = QLineEdit()
-        self.ticker.setPlaceholderText("선택: 6자리 종목코드 또는 정확한 종목명, 비우면 전체")
+        self.ticker.setPlaceholderText("선택: 종목코드 또는 종목명 일부 입력, 비우면 전체")
+        self._security_search = security_search
+        self.ticker_completer = SecurityCompleter(self.ticker, self)
+        self.ticker_completer.searchRequested.connect(self._suggest_security)
         self.chunk = QSpinBox()
         self.chunk.setRange(1, 90)
         self.chunk.setValue(90)
@@ -63,10 +73,16 @@ class RangeDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self); layout.addLayout(form); layout.addWidget(buttons)
 
+    def _suggest_security(self, query: str) -> None:
+        try:
+            self.ticker_completer.set_matches(self._security_search(query, limit=20))
+        except Exception:
+            self.ticker_completer.set_matches([])
+
     def request(self) -> JobRequest:
         start = self.start.date().toPython()
         end = self.end.date().toPython()
-        ticker = self.ticker.text().strip() or None
+        ticker = SecurityCompleter.value(self.ticker.text()) or None
         if self._menu == 5:
             return JobRequest(JobKind.MENU_5, start=start, end=end, ticker=ticker,
                               chunk_days=self.chunk.value())
@@ -80,7 +96,7 @@ class DateDialog(QDialog):
     def __init__(self, title: str, label: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.date = QDateEdit(QDate.currentDate(), calendarPopup=True)
+        self.date = CalendarDateEdit(QDate.currentDate())
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         form = QFormLayout(self); form.addRow(label, self.date); form.addRow(buttons)
@@ -183,7 +199,12 @@ class KrxJobMenuWindow(QMainWindow):
                 return
             self._controller.run(JobRequest(JobKind(job.number), end=dialog.value()))
             return
-        range_dialog = RangeDialog(job.title, menu=job.number, parent=self)
+        security_search = SecuritySearchService(
+            WorkstationData(resolve_database_target(self._root, read_only=True))
+        )
+        range_dialog = RangeDialog(
+            job.title, menu=job.number, security_search=security_search.search, parent=self
+        )
         if range_dialog.exec() == QDialog.Accepted:
             self._controller.run(range_dialog.request())
 
@@ -216,7 +237,7 @@ class KrxJobMenuWindow(QMainWindow):
         by_number[2] = UiJob(2, "당일 데이터 갱신 (장 마감 후)",
                              "기존 KRX 일일 파이프라인 후 t8424/t8436/t1516/t8429를 PostgreSQL에 통합 저장합니다.", True)
         by_number[3] = UiJob(3, "주가·이동평균 패턴 검색",
-                             "전체 종목에서 이동평균 유사 패턴 또는 박스권 돌파 종목을 로컬 DB로 검색합니다.", True)
+                             "전체 종목에서 이동평균 유사 패턴 또는 지정 기간 박스권 패턴을 로컬 DB로 검색합니다.", True)
         by_number[5] = UiJob(5, "LS 수급 원본 갱신 (날짜 지정)",
                              "t1702는 LS OPEN API 우선, 실패 요청만 Xing fallback으로 PostgreSQL에 저장합니다.", True)
         by_number[7] = UiJob(7, "LS 종목별 일봉·수급 원본 보완",

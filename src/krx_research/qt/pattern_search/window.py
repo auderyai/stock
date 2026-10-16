@@ -6,7 +6,7 @@ from typing import Callable
 
 from PySide6.QtCore import QDate, QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDateEdit, QDialog, QFormLayout, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
     QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 
@@ -15,7 +15,7 @@ from krx_research.qt.chart_window import ChartWindow
 from krx_research.qt.presentation.column_catalog import label_for
 from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
 from krx_research.qt.services.chart_service import ChartService
-from krx_research.qt.services.box_breakout import BoxBreakoutQuery, BoxBreakoutSearchService
+from krx_research.qt.services.box_breakout import PeriodPatternQuery, PeriodPatternSearchService
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
     PatternVectorCache, PostgreSQLPatternRepository,
@@ -23,6 +23,8 @@ from krx_research.qt.services.pattern_similarity import (
 from krx_research.qt.strategies.chart_navigation import SynchronizedChartStrategy
 from krx_research.ui.data import WorkstationData
 from krx_research.qt.widgets.result_table import ResultTable
+from krx_research.qt.widgets.calendar_date_edit import CalendarDateEdit
+from krx_research.qt.widgets.security_completer import SecurityCompleter
 
 
 class SearchWorker(QObject):
@@ -53,6 +55,9 @@ class PatternSearchDialog(QDialog):
         target = resolve_database_target(self._root, read_only=True) if repository is None or chart_service is None else None
         self._repository = repository or PostgreSQLPatternRepository(target)
         self._chart_service = chart_service or ChartService(WorkstationData(target))
+        cache = PatternVectorCache(self._root / ".local_cache" / "pattern_vectors")
+        self._pattern_service = PatternSimilaritySearchService(self._repository, cache)
+        self._period_service = PeriodPatternSearchService(self._repository)
         self._presenter = PatternResultPresenter()
         self._chart_strategy = SynchronizedChartStrategy(self._create_chart, self._keep_chart)
         self.setWindowTitle("메뉴 3 · 주가 패턴 검색")
@@ -60,14 +65,18 @@ class PatternSearchDialog(QDialog):
         self._build(); self._mode_changed(0)
 
     def _build(self) -> None:
-        self.mode = QComboBox(); self.mode.addItems(("이동평균 유사 패턴", "박스권 돌파"))
-        self.security = QLineEdit(); self.security.setPlaceholderText("종목코드 또는 정확한 종목명")
+        self.mode = QComboBox(); self.mode.addItems(("이동평균 유사 패턴", "지정 기간 박스권 패턴"))
+        self.security = QLineEdit(); self.security.setPlaceholderText("종목코드 또는 종목명 일부 입력")
+        self.security_completer = SecurityCompleter(self.security, self)
+        self.security_completer.searchRequested.connect(self._suggest_security)
         today = QDate.currentDate()
-        self.start = QDateEdit(today.addMonths(-4), calendarPopup=True)
-        self.end = QDateEdit(today, calendarPopup=True)
+        self.start = CalendarDateEdit(today.addMonths(-4))
+        self.end = CalendarDateEdit(today)
         self.start.setMaximumDate(today); self.end.setMaximumDate(today)
         self.average = QComboBox(); self.average.addItems(tuple(kind.value for kind in MovingAverageKind))
         self.periods = QLineEdit("5, 20, 60")
+        self.periods.setPlaceholderText("2~500일, 최대 8개")
+        self.periods.setToolTip("쉼표로 최대 8개를 입력합니다. 예: 5,10,15,33,56,112,224,448")
         self.volume = QCheckBox("거래량 패턴 포함")
         self.top = QSpinBox(); self.top.setRange(1, 100); self.top.setValue(20)
         form = QFormLayout()
@@ -95,11 +104,17 @@ class PatternSearchDialog(QDialog):
         for widget in (self.average, self.periods, self.volume): widget.setEnabled(similar)
         self.help.setText(
             "선택한 종목의 주가와 이동평균선 모양을 같은 기간의 전체 종목과 비교합니다. "
-            "이동평균은 SMA·EMA·WMA 및 원하는 기간을 지정할 수 있습니다."
+            "SMA·EMA·WMA를 최대 8개 지정하며 이동평균선의 모양과 선 사이 이격도를 함께 비교합니다."
             if similar else
-            "기준 종목과 기간에서 박스 상단·하단, 돌파 시점, 돌파율과 거래량 변화를 자동으로 파악한 뒤 "
-            "같은 기간의 전체 종목에서 유사한 박스권 돌파 패턴을 찾습니다."
+            "프로그램이 돌파 여부나 돌파일을 판단하지 않습니다. 사용자가 지정한 기준 종목의 전체 기간 "
+            "주가·고가·저가·거래량 경로와 유사한 종목을 같은 기간에서 찾습니다."
         )
+
+    def _suggest_security(self, query: str) -> None:
+        try:
+            self.security_completer.set_matches(self._pattern_service.suggest_securities(query))
+        except Exception:
+            self.security_completer.set_matches([])
 
     def _search(self) -> None:
         try:
@@ -117,17 +132,17 @@ class PatternSearchDialog(QDialog):
 
     def _command(self) -> Callable[[], list[dict]]:
         start, end = self.start.date().toPython(), self.end.date().toPython()
+        security = SecurityCompleter.value(self.security.text())
         if self.mode.currentIndex() == 1:
-            query = BoxBreakoutQuery(self.security.text().strip(), start, end, self.top.value())
-            return lambda: BoxBreakoutSearchService(self._repository).search(query)
+            query = PeriodPatternQuery(security, start, end, self.top.value())
+            return lambda: self._period_service.search(query)
         periods = tuple(map(int, filter(None, re.split(r"[ ,]+", self.periods.text().strip()))))
         query = PatternSearchQuery(
-            self.security.text().strip(), start, end,
+            security, start, end,
             MovingAverageSpec(MovingAverageKind(self.average.currentText()), periods),
             self.top.value(), True, self.volume.isChecked(),
         )
-        cache = PatternVectorCache(self._root / ".local_cache" / "pattern_vectors")
-        return lambda: PatternSimilaritySearchService(self._repository, cache).search(query)
+        return lambda: self._pattern_service.search(query)
 
     @Slot(list)
     def _show_rows(self, rows: list[dict]) -> None:
