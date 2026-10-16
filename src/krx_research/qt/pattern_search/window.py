@@ -104,10 +104,11 @@ class PatternSearchDialog(QDialog):
         for widget in (self.average, self.periods, self.volume): widget.setEnabled(similar)
         self.help.setText(
             "선택한 종목의 주가와 이동평균선 모양을 같은 기간의 전체 종목과 비교합니다. "
-            "SMA·EMA·WMA를 최대 8개 지정하며 이동평균선의 모양과 선 사이 이격도를 함께 비교합니다."
+            "지정 기간은 기준 모양이며, 전체 종목의 DB 최신일부터 같은 거래일 수의 최근 패턴을 찾습니다. "
+            "SMA·EMA·WMA를 최대 8개 지정하고 이동평균선 모양과 이격도를 함께 비교합니다."
             if similar else
             "프로그램이 돌파 여부나 돌파일을 판단하지 않습니다. 사용자가 지정한 기준 종목의 전체 기간 "
-            "주가·고가·저가·거래량 경로와 유사한 종목을 같은 기간에서 찾습니다."
+            "주가·고가·저가·거래량 경로를 기준으로 DB 최신일부터 같은 거래일 수의 최근 패턴을 찾습니다."
         )
 
     def _suggest_security(self, query: str) -> None:

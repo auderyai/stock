@@ -65,12 +65,15 @@ class Security:
 class PatternVector:
     channels: dict[str, np.ndarray]
     observations: int
+    start: date | None = None
+    end: date | None = None
 
 
 class PatternRepository(Protocol):
     def resolve(self, security: str) -> Security: ...
     def search_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]: ...
     def history(self, start: date, end: date) -> pd.DataFrame: ...
+    def latest_date(self) -> date: ...
     def latest(self, codes: list[str]) -> dict[str, dict]: ...
 
 
@@ -89,10 +92,11 @@ class PatternVectorCache:
                 names = saved["channels"].tolist()
                 codes, fingerprints = saved["codes"], saved["fingerprints"]
                 observations, values = saved["observations"], saved["values"]
+                starts, ends = saved["starts"], saved["ends"]
                 return {
                     str(code): (str(fingerprint), None if not observations[index] else PatternVector(
                         {name: values[index, channel] for channel, name in enumerate(names)},
-                        int(observations[index]),
+                        int(observations[index]), self._date(starts[index]), self._date(ends[index]),
                     ))
                     for index, (code, fingerprint) in enumerate(zip(codes, fingerprints))
                 }
@@ -116,6 +120,10 @@ class PatternVectorCache:
             codes=np.array([item[0] for item in usable]),
             fingerprints=np.array([item[1] for item in usable]),
             observations=np.array([item[2].observations if item[2] else 0 for item in usable]),
+            starts=np.array([item[2].start.isoformat() if item[2] and item[2].start else ""
+                             for item in usable]),
+            ends=np.array([item[2].end.isoformat() if item[2] and item[2].end else ""
+                           for item in usable]),
             channels=np.array(names),
             values=np.array([[item[2].channels[name] for name in names] if item[2] else empty
                              for item in usable]),
@@ -123,12 +131,17 @@ class PatternVectorCache:
 
     def _path(self, query: PatternSearchQuery) -> Path:
         payload = json.dumps({
-            "version": 2,
+            "version": 3,
             "start": query.start.isoformat(), "end": query.end.isoformat(),
             "kind": query.averages.kind.value, "periods": query.averages.periods,
             "price": query.include_price, "volume": query.include_volume,
         }, sort_keys=True).encode()
         return self.directory / f"{sha256(payload).hexdigest()[:20]}.npz"
+
+    @staticmethod
+    def _date(value) -> date | None:
+        text = str(value)
+        return date.fromisoformat(text) if text else None
 
 
 class PostgreSQLPatternRepository:
@@ -208,6 +221,12 @@ class PostgreSQLPatternRepository:
         )
         return {str(row["stock_code"]): row for row in rows}
 
+    def latest_date(self) -> date:
+        rows = self._rows("SELECT max(trade_date)::date latest_date FROM market.ohlcv_daily")
+        if not rows or not rows[0].get("latest_date"):
+            raise ValueError("최신 주가 기준일을 찾을 수 없습니다.")
+        return rows[0]["latest_date"]
+
 
 class TimeSeriesVectorizer:
     """Normalizes and resamples comparable time-series paths."""
@@ -244,18 +263,28 @@ class PatternVectorizer:
         self.include_price, self.include_volume = include_price, include_volume
 
     def vectorize(self, frame: pd.DataFrame, start: date, end: date) -> PatternVector | None:
+        return self._vectorize(frame, start=start, end=end)
+
+    def vectorize_recent(self, frame: pd.DataFrame, observations: int) -> PatternVector | None:
+        return self._vectorize(frame, observations=observations)
+
+    def _vectorize(self, frame: pd.DataFrame, *, start: date | None = None,
+                   end: date | None = None, observations: int | None = None) -> PatternVector | None:
         data = frame.sort_values("trade_date").drop_duplicates("trade_date").copy()
         data["close"] = pd.to_numeric(data["close"], errors="coerce")
         for period in self.spec.periods:
             data[f"ma_{period}"] = self._average(data["close"], period)
-        mask = data.trade_date.between(pd.Timestamp(start), pd.Timestamp(end))
-        view = data.loc[mask]
+        view = data if start is None else data.loc[
+            data.trade_date.between(pd.Timestamp(start), pd.Timestamp(end))
+        ]
         columns = [f"ma_{period}" for period in self.spec.periods]
         if self.include_price:
             columns.insert(0, "close")
         if self.include_volume:
             columns.append("volume")
         view = view.dropna(subset=columns)
+        if observations is not None:
+            view = view.tail(observations)
         if len(view) < 12:
             return None
         channels: dict[str, np.ndarray] = {}
@@ -269,7 +298,9 @@ class PatternVectorizer:
         for short, long in combinations(self.spec.periods, 2):
             left, right = view[f"ma_{short}"].to_numpy(dtype=float), view[f"ma_{long}"].to_numpy(dtype=float)
             channels[f"gap_{short}_{long}"] = self.path.resample(left / right - 1.0)
-        return PatternVector(channels, len(view))
+        return PatternVector(
+            channels, len(view), view.trade_date.iloc[0].date(), view.trade_date.iloc[-1].date()
+        )
 
     def _average(self, series: pd.Series, period: int) -> pd.Series:
         if self.spec.kind == MovingAverageKind.EMA:
@@ -329,13 +360,22 @@ class PatternSimilaritySearchService:
     def search(self, query: PatternSearchQuery) -> list[dict]:
         security = self.repository.resolve(query.security)
         warmup = query.start - timedelta(days=max(query.averages.periods) * 3)
-        history = self.repository.history(warmup, query.end)
+        reference_history = self.repository.history(warmup, query.end)
         vectorizer = PatternVectorizer(
             query.averages, include_price=query.include_price, include_volume=query.include_volume
         )
-        groups = {str(code): group for code, group in history.groupby("stock_code", sort=False)}
-        if security.code not in groups:
+        reference_groups = {
+            str(code): group for code, group in reference_history.groupby("stock_code", sort=False)
+        }
+        if security.code not in reference_groups:
             raise ValueError(f"{security.name}({security.code})의 지정 기간 자료가 없습니다.")
+        reference = vectorizer.vectorize(reference_groups[security.code], query.start, query.end)
+        if reference is None:
+            raise ValueError("기준 종목의 유효한 패턴 관측치가 부족합니다.")
+        latest = self.repository.latest_date()
+        recent_start = latest - timedelta(days=(reference.observations + max(query.averages.periods)) * 3)
+        recent_history = self.repository.history(recent_start, latest)
+        groups = {str(code): group for code, group in recent_history.groupby("stock_code", sort=False)}
         cached = self.cache.load(query) if self.cache else {}
         vectors: dict[str, tuple[str, PatternVector | None]] = {}
         changed = False
@@ -345,27 +385,25 @@ class PatternSimilaritySearchService:
             if match and match[0] == fingerprint:
                 vector = match[1]
             else:
-                vector = vectorizer.vectorize(frame, query.start, query.end)
+                vector = vectorizer.vectorize_recent(frame, reference.observations)
                 changed = True
             vectors[code] = (fingerprint, vector)
         if self.cache and (changed or set(cached) != set(vectors)):
             self.cache.save(query, vectors)
-        reference = vectors[security.code][1]
-        if reference is None:
-            raise ValueError("기준 종목의 유효한 패턴 관측치가 부족합니다.")
         matches = []
         for code, frame in groups.items():
             if code == security.code:
                 continue
             candidate = vectors[code][1]
-            if candidate is None or candidate.observations < reference.observations * 0.8:
+            if (candidate is None or candidate.end != latest or
+                    candidate.observations < reference.observations * 0.8):
                 continue
             scores = PatternSimilarity.compare(reference, candidate)
             matches.append((scores["similarity"], code, str(frame.stock_name.iloc[-1]), scores))
         matches.sort(reverse=True)
         selected = matches[: query.top_n]
         snapshots = self.repository.latest([code for _, code, _, _ in selected])
-        return [self._row(code, name, scores, snapshots.get(code, {}), query)
+        return [self._row(code, name, scores, vectors[code][1], snapshots.get(code, {}), query)
                 for _, code, name, scores in selected]
 
     @staticmethod
@@ -374,7 +412,7 @@ class PatternSimilaritySearchService:
         return f"{len(frame)}:{last.trade_date}:{last.close}:{last.volume}"
 
     @staticmethod
-    def _row(code: str, name: str, scores: dict, snapshot: dict,
+    def _row(code: str, name: str, scores: dict, vector: PatternVector, snapshot: dict,
              query: PatternSearchQuery) -> dict:
         value = lambda key: snapshot.get(key)
         return {
@@ -390,6 +428,8 @@ class PatternSimilaritySearchService:
             ),
             "volume_similarity_pct": PatternSimilaritySearchService._round(scores["volume_similarity"]),
             "moving_average": f"{query.averages.kind.value} {','.join(map(str, query.averages.periods))}",
+            "pattern_start": vector.start, "pattern_end": vector.end,
+            "pattern_days": vector.observations,
             "db_recent_date": value("trade_date"),
             "rise_pct": PatternSimilaritySearchService._round(value("rise_pct")),
             "close": value("close"), "open": value("open"),

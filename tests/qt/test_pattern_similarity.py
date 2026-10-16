@@ -38,6 +38,7 @@ class FakeRepository:
         return [row for row in rows if query in row["ticker"] or query in row["name"]][:limit]
     def history(self, start, end):
         return self.frame[self.frame.trade_date.between(pd.Timestamp(start), pd.Timestamp(end))]
+    def latest_date(self): return self.frame.trade_date.max().date()
     def latest(self, codes):
         return {code: {"stock_name": "유사종목" if code == "000001" else "반대종목",
                        "trade_date": date(2026, 10, 15), "rise_pct": 1.25,
@@ -85,6 +86,21 @@ class PatternSimilarityTests(unittest.TestCase):
         self.assertEqual(rows[0]["moving_average"], "SMA 5,10,15")
         self.assertEqual(rows[0]["market_cap_eok"], 3000.0)
         self.assertEqual(rows[0]["trading_value_eok"], 120.0)
+        self.assertEqual(rows[0]["pattern_end"], FakeRepository().latest_date())
+
+    def test_search_excludes_stale_candidate_not_ending_on_latest_date(self):
+        repository = FakeRepository()
+        latest = repository.latest_date()
+        repository.frame = repository.frame[
+            ~((repository.frame.stock_code == "000001") &
+              (repository.frame.trade_date == pd.Timestamp(latest)))
+        ]
+        query = PatternSearchQuery(
+            "078350", date(2026, 2, 2), date(2026, 5, 15),
+            MovingAverageSpec(MovingAverageKind.SMA, (5, 10, 15)), top_n=2,
+        )
+        rows = PatternSimilaritySearchService(repository).search(query)
+        self.assertNotIn("000001", [row["stock_code"] for row in rows])
 
     def test_invalid_average_period_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -102,20 +118,24 @@ class PatternSimilarityTests(unittest.TestCase):
 
     def test_period_pattern_does_not_infer_a_breakout_event(self):
         repository = FakeRepository()
-        dates = pd.bdate_range("2026-09-01", periods=30)
-        shape = 100 + np.sin(np.linspace(0, 5, len(dates)))
-        target = repository._frame("078350", "기준종목", dates, shape)
-        similar = repository._frame("000003", "유사종목", dates, shape * .5)
-        opposite = repository._frame("000004", "반대종목", dates, shape[::-1])
+        reference_dates = pd.bdate_range("2026-04-01", periods=30)
+        recent_dates = pd.bdate_range("2026-09-01", periods=30)
+        shape = 100 + np.sin(np.linspace(0, 5, len(reference_dates)))
+        target = repository._frame("078350", "기준종목", reference_dates, shape)
+        similar = repository._frame("000003", "유사종목", recent_dates, shape * .5)
+        opposite = repository._frame("000004", "반대종목", recent_dates, shape[::-1])
         repository.frame = pd.concat([target, similar, opposite], ignore_index=True)
         rows = PeriodPatternSearchService(repository).search(PeriodPatternQuery(
-            "078350", dates[0].date(), dates[-1].date(), top_n=1,
+            "078350", reference_dates[0].date(), reference_dates[-1].date(), top_n=1,
         ))
         self.assertEqual([row["stock_code"] for row in rows], ["078350", "000003"])
         self.assertEqual(rows[0]["pattern_role"], "기준 패턴")
+        self.assertEqual(rows[1]["pattern_role"], "최신 유사 패턴")
         self.assertNotIn("breakout_date", rows[0])
-        self.assertEqual(rows[0]["pattern_start"], dates[0].date())
-        self.assertEqual(rows[0]["pattern_end"], dates[-1].date())
+        self.assertEqual(rows[0]["pattern_start"], reference_dates[0].date())
+        self.assertEqual(rows[0]["pattern_end"], reference_dates[-1].date())
+        self.assertEqual(rows[1]["pattern_start"], recent_dates[0].date())
+        self.assertEqual(rows[1]["pattern_end"], recent_dates[-1].date())
 
     def test_assistant_routes_pattern_search_to_registered_service(self):
         class Search:

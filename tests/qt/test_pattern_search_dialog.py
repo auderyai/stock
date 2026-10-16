@@ -91,6 +91,13 @@ class PatternSearchDialogTests(unittest.TestCase):
             self.app.processEvents()
             self.assertTrue(dialog.start.calendarWidget().isVisible())
             dialog.start.calendarWidget().parentWidget().hide()
+            QTest.mouseClick(
+                dialog.end.lineEdit(), Qt.LeftButton,
+                pos=dialog.end.lineEdit().rect().center(),
+            )
+            self.app.processEvents()
+            self.assertTrue(dialog.end.calendarWidget().isVisible())
+            dialog.end.calendarWidget().parentWidget().hide()
             dialog.close()
 
     def test_collection_range_dialog_reuses_partial_name_completer(self):

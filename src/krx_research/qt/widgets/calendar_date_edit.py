@@ -13,11 +13,22 @@ class CalendarDateEdit(QDateEdit):
         self.setCalendarPopup(True)
         self.setDisplayFormat("yyyy-MM-dd")
         self.calendarWidget().setGridVisible(True)
+        self.lineEdit().installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.lineEdit() and event.type() == QEvent.MouseButtonPress:
+            if event.button() == Qt.LeftButton:
+                self._open_calendar(event.modifiers())
+                return True
+        return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.LeftButton:
             super().mousePressEvent(event)
             return
+        self._open_calendar(event.modifiers())
+
+    def _open_calendar(self, modifiers) -> None:
         option = QStyleOptionSpinBox()
         self.initStyleOption(option)
         arrow = self.style().subControlRect(
@@ -26,6 +37,6 @@ class CalendarDateEdit(QDateEdit):
         position = QPointF(arrow)
         popup_event = QMouseEvent(
             QEvent.MouseButtonPress, position, self.mapToGlobal(arrow),
-            Qt.LeftButton, Qt.LeftButton, event.modifiers(),
+            Qt.LeftButton, Qt.LeftButton, modifiers,
         )
         super().mousePressEvent(popup_event)
