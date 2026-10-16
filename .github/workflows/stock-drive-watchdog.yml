@@ -1,0 +1,40 @@
+name: Stock Drive cloud watchdog
+
+on:
+  schedule:
+    # KST 20:50~23:50 and 21:20~00:20. Multiple checks tolerate delayed GitHub cron events.
+    - cron: "50 11-14 * * 1-5"
+    - cron: "20 12-15 * * 1-6"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "확인할 거래일(YYYY-MM-DD), 비우면 한국시간으로 결정"
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: stock-drive-cloud-watchdog
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      TARGET_DATE: ${{ inputs.target_date }}
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check scheduled run and recover once
+        run: |
+          args=()
+          if [[ -n "$TARGET_DATE" ]]; then
+            args+=(--date "$TARGET_DATE")
+          fi
+          python scripts/stock_drive_watchdog.py "${args[@]}"
