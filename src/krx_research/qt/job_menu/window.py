@@ -107,7 +107,7 @@ class KrxJobMenuWindow(QMainWindow):
         font = title.font(); font.setPointSize(16); font.setBold(True); title.setFont(font)
         layout.addWidget(title)
         layout.addWidget(QLabel(
-            "메뉴 2는 로컬 갱신, 메뉴 5·7은 LS 수집, 메뉴 8·9·10은 Google Drive 검증·반영·정리입니다."
+            "메뉴 2는 로컬 갱신, 메뉴 3은 주가 패턴 검색, 메뉴 5·7은 LS 수집, 메뉴 8·9·10은 Drive 관리입니다."
         ))
         self.list = QListWidget()
         for job in self._jobs:
@@ -153,6 +153,10 @@ class KrxJobMenuWindow(QMainWindow):
             return
         job: UiJob = item.data(Qt.UserRole)
         self.log.clear()
+        if job.number == 3:
+            from krx_research.qt.pattern_search import PatternSearchDialog
+            PatternSearchDialog(self._root, self).exec()
+            return
         if not job.integrated:
             if job.legacy is None:
                 QMessageBox.warning(self, "실행 불가", "기존 작업 실행정보가 없습니다.")
@@ -211,6 +215,8 @@ class KrxJobMenuWindow(QMainWindow):
                 by_number[number] = UiJob(number, self._strip_number(spec.title), spec.description, False, spec)
         by_number[2] = UiJob(2, "당일 데이터 갱신 (장 마감 후)",
                              "기존 KRX 일일 파이프라인 후 t8424/t8436/t1516/t8429를 PostgreSQL에 통합 저장합니다.", True)
+        by_number[3] = UiJob(3, "주가·이동평균 패턴 검색",
+                             "전체 종목에서 이동평균 유사 패턴 또는 박스권 돌파 종목을 로컬 DB로 검색합니다.", True)
         by_number[5] = UiJob(5, "LS 수급 원본 갱신 (날짜 지정)",
                              "t1702는 LS OPEN API 우선, 실패 요청만 Xing fallback으로 PostgreSQL에 저장합니다.", True)
         by_number[7] = UiJob(7, "LS 종목별 일봉·수급 원본 보완",

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from krx_research.qt.services.assistant_service import AssistantService
+from krx_research.qt.services.box_breakout import BoxBreakoutQuery, BoxBreakoutSearchService
 from krx_research.qt.services.codex_subscription_backend import CodexSubscriptionBackend
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
@@ -27,7 +28,9 @@ class FakeRepository:
     @staticmethod
     def _frame(code, name, dates, close):
         return pd.DataFrame({"stock_code": code, "stock_name": name, "trade_date": dates,
-                             "close": close, "volume": np.linspace(1000, 2000, len(dates))})
+                             "close": close, "high": np.asarray(close) * 1.01,
+                             "low": np.asarray(close) * .99,
+                             "volume": np.linspace(1000, 2000, len(dates))})
 
     def resolve(self, _security): return Security("078350", "한양디지텍")
     def history(self, start, end):
@@ -75,6 +78,22 @@ class PatternSimilarityTests(unittest.TestCase):
             loaded = cache.load(query)
         self.assertEqual(loaded["000001"][1].observations, 70)
         self.assertIsNone(loaded["000002"][1])
+
+    def test_box_breakout_requires_price_and_volume_confirmation(self):
+        repository = FakeRepository()
+        dates = pd.bdate_range("2026-09-01", periods=30)
+        target = repository._frame("078350", "기준종목", dates, np.r_[np.full(29, 100), 105])
+        target.loc[target.index[-1], "volume"] = 5000
+        breakout = repository._frame("000003", "유사종목", dates, np.r_[np.full(29, 50), 52.5])
+        breakout.loc[breakout.index[-1], "volume"] = 2500
+        failed = repository._frame("000004", "미돌파", dates, np.full(30, 100))
+        repository.frame = pd.concat([target, breakout, failed], ignore_index=True)
+        rows = BoxBreakoutSearchService(repository).search(BoxBreakoutQuery(
+            "078350", dates[0].date(), dates[-1].date(), top_n=10,
+        ))
+        self.assertEqual([row["stock_code"] for row in rows], ["078350", "000003"])
+        self.assertEqual(rows[0]["pattern_role"], "기준 패턴")
+        self.assertGreater(rows[0]["breakout_pct"], 1)
 
     def test_assistant_routes_pattern_search_to_registered_service(self):
         class Search:

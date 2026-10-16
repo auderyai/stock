@@ -156,7 +156,7 @@ class PostgreSQLPatternRepository:
         rows = self._rows(
             "SELECT btrim(o.ticker) stock_code,COALESCE(m.name,btrim(o.ticker)) stock_name,"
             "o.trade_date::date trade_date,o.close::double precision close,"
-            "o.volume::double precision volume "
+            "o.high::double precision high,o.low::double precision low,o.volume::double precision volume "
             "FROM market.ohlcv_daily o LEFT JOIN market.security_master m "
             "ON btrim(m.ticker)=btrim(o.ticker) "
             "WHERE o.trade_date BETWEEN %s AND %s AND o.close>0 "

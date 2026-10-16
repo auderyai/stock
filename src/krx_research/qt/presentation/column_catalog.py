@@ -101,6 +101,14 @@ COLUMN_LABELS: dict[str, str] = {
     "db_recent_date": "DB 최근일",
     "rise_pct": "최근일 상승률(%)",
     "market_cap_eok": "시가총액(억원)",
+    "box_high": "박스 상단(원)",
+    "box_low": "박스 하단(원)",
+    "box_width_pct": "박스 폭(%)",
+    "breakout_pct": "상단 돌파율(%)",
+    "volume_ratio": "20일 평균 거래량 배수",
+    "breakout_date": "돌파 기준일",
+    "pattern_role": "구분",
+    "box_similarity_pct": "박스 돌파 유사도(%)",
 }
 
 SCREEN_BASE_COLUMNS = (
