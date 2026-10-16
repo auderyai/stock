@@ -15,6 +15,7 @@ class PatternResultPresenter:
         "moving_average", "pattern_start", "pattern_end", "pattern_days",
         "period_return_pct", "trend_slope_pct", "range_position_pct", "period_range_pct",
         "maximum_gap_pct", "history_range_position_pct",
+        "rising_wave_pct", "rising_wave_days",
     )
     LATEST = (
         "db_recent_date", "rise_pct", "open", "high", "low", "close",

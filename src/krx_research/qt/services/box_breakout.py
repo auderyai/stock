@@ -7,7 +7,10 @@ import numpy as np
 import pandas as pd
 
 from .pattern_similarity import PatternRepository, PatternSimilarity, TimeSeriesVectorizer
-from .pattern_policy import PatternQualityPolicy, QualityAssessment, TrendAssessment, UptrendPolicy
+from .pattern_policy import (
+    PatternQualityPolicy, QualityAssessment, RisingWaveAssessment, RisingWavePolicy,
+    TrendAssessment, UptrendPolicy,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +41,7 @@ class PeriodPattern:
     end: date
     trend: TrendAssessment
     quality: QualityAssessment
+    wave: RisingWaveAssessment
 
 
 class PeriodPatternSearchService:
@@ -47,6 +51,7 @@ class PeriodPatternSearchService:
         self.repository = repository
         self.trend_policy = UptrendPolicy()
         self.quality_policy = PatternQualityPolicy()
+        self.wave_policy = RisingWavePolicy()
 
     def search(self, query: PeriodPatternQuery) -> list[dict]:
         security = self.repository.resolve(query.security)
@@ -72,7 +77,8 @@ class PeriodPatternSearchService:
             candidate = self._pattern(frame, reference.observations)
             if (candidate is None or candidate.end != latest or
                     candidate.observations < reference.observations * 0.8 or
-                    not candidate.trend.accepted or not candidate.quality.accepted):
+                    not candidate.trend.accepted or not candidate.quality.accepted or
+                    not candidate.wave.accepted):
                 continue
             scores = self._compare(reference, candidate)
             matches.append((scores["similarity"], code, candidate, scores))
@@ -106,6 +112,7 @@ class PeriodPatternSearchService:
         channels["volume"] = vectorizer.volume(data.volume.to_numpy(dtype=float))
         trend = self.trend_policy.assess(data)
         quality = self.quality_policy.assess(frame)
+        wave = self.wave_policy.assess(frame)
         return PeriodPattern(
             str(data.stock_code.iloc[-1]), str(data.stock_name.iloc[-1]), len(data), channels,
             (close[-1] / close[0] - 1) * 100,
@@ -113,6 +120,7 @@ class PeriodPatternSearchService:
             data.trade_date.iloc[0].date(), data.trade_date.iloc[-1].date(),
             trend,
             quality,
+            wave,
         )
 
     @staticmethod
@@ -143,6 +151,8 @@ class PeriodPatternSearchService:
             "range_position_pct": round(pattern.trend.range_position_pct, 2),
             "maximum_gap_pct": round(pattern.quality.maximum_gap_pct, 2),
             "history_range_position_pct": round(pattern.quality.history_range_position_pct, 2),
+            "rising_wave_pct": round(pattern.wave.gain_pct, 2),
+            "rising_wave_days": pattern.wave.trading_days,
             "db_recent_date": value("trade_date"), "rise_pct": value("rise_pct"),
             "close": value("close"), "market_cap_eok": eok("market_cap"),
             "trading_value_eok": eok("trading_value"),

@@ -25,6 +25,13 @@ class QualityAssessment:
     history_range_position_pct: float
 
 
+@dataclass(frozen=True, slots=True)
+class RisingWaveAssessment:
+    accepted: bool
+    gain_pct: float
+    trading_days: int
+
+
 class UptrendPolicy:
     """Admits only rising patterns that finish in the upper price range."""
 
@@ -66,3 +73,39 @@ class PatternQualityPolicy:
         accepted = (gap <= 35 and unchanged <= 35 and zero_volume <= 10 and
                     drawdown >= -70 and position >= 30)
         return QualityAssessment(accepted, gap, unchanged, zero_volume, drawdown, position)
+
+
+class RisingWavePolicy:
+    """Requires a multi-day advance instead of a single jump from a flat base."""
+
+    def __init__(self, minimum_gain_pct: float = 10.0, minimum_days: int = 5,
+                 maximum_days: int = 40, minimum_up_days: int = 3,
+                 maximum_single_day_share: float = 0.6):
+        self.minimum_gain = minimum_gain_pct / 100.0
+        self.minimum_days, self.maximum_days = int(minimum_days), int(maximum_days)
+        self.minimum_up_days = int(minimum_up_days)
+        self.maximum_single_day_share = float(maximum_single_day_share)
+
+    def assess(self, frame: pd.DataFrame) -> RisingWaveAssessment:
+        close = pd.to_numeric(
+            frame.sort_values("trade_date").drop_duplicates("trade_date").close,
+            errors="coerce",
+        ).dropna().to_numpy(dtype=float)
+        if len(close) < self.minimum_days:
+            return RisingWaveAssessment(False, 0.0, 0)
+        daily = np.diff(close) / close[:-1]
+        positive_counts = np.r_[0, np.cumsum(daily > 0)]
+        positive_daily = pd.Series(np.maximum(daily, 0.0))
+        best_gain, best_days = 0.0, 0
+        for days in range(self.minimum_days, min(self.maximum_days, len(close)) + 1):
+            width = days - 1
+            gains = close[width:] / close[:-width] - 1.0
+            up_days = positive_counts[width:] - positive_counts[:-width]
+            largest_day = positive_daily.rolling(width).max().to_numpy()[width - 1:]
+            accepted = ((gains >= self.minimum_gain) & (up_days >= self.minimum_up_days) &
+                        (largest_day <= gains * self.maximum_single_day_share))
+            if accepted.any():
+                gain = float(gains[accepted].max())
+                if gain > best_gain:
+                    best_gain, best_days = gain, days
+        return RisingWaveAssessment(best_days > 0, best_gain * 100.0, best_days)

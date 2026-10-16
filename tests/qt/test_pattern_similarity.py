@@ -13,7 +13,9 @@ from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
     PatternSimilarity, PatternVector, PatternVectorCache, PatternVectorizer, Security,
 )
-from krx_research.qt.services.pattern_policy import PatternQualityPolicy, UptrendPolicy
+from krx_research.qt.services.pattern_policy import (
+    PatternQualityPolicy, RisingWavePolicy, UptrendPolicy,
+)
 
 
 class FakeRepository:
@@ -66,6 +68,17 @@ class PatternSimilarityTests(unittest.TestCase):
         self.assertFalse(policy.assess(frame(discontinuous)).accepted)
         bottom = np.r_[np.linspace(500, 100, 150), np.linspace(100, 120, 150)]
         self.assertFalse(policy.assess(frame(bottom)).accepted)
+
+    def test_rising_wave_requires_distributed_multi_day_advance(self):
+        dates = pd.bdate_range("2026-01-01", periods=100)
+        frame = lambda close: FakeRepository._frame("000001", "검사", dates, close)
+        policy = RisingWavePolicy()
+        single_jump = np.r_[np.full(99, 100.0), 120.0]
+        multi_day = np.r_[np.full(95, 100.0), 102.0, 104.0, 107.0, 110.0, 112.0]
+        self.assertFalse(policy.assess(frame(single_jump)).accepted)
+        assessment = policy.assess(frame(multi_day))
+        self.assertTrue(assessment.accepted)
+        self.assertGreaterEqual(assessment.trading_days, 5)
 
     def test_vectorizer_supports_user_selected_average(self):
         repository = FakeRepository()

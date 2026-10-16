@@ -110,6 +110,8 @@ COLUMN_LABELS: dict[str, str] = {
     "range_position_pct": "구간 내 종가 위치(%)",
     "maximum_gap_pct": "최대 일간 단절(%)",
     "history_range_position_pct": "2년 범위 내 종가 위치(%)",
+    "rising_wave_pct": "확인 상승파동(%)",
+    "rising_wave_days": "상승파동 거래일",
     "period_range_pct": "기간 고저폭(%)",
     "pattern_role": "구분",
 }
