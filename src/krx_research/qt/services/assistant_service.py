@@ -18,6 +18,7 @@ from krx_research.application.openai_credentials import OpenAICredentialResolver
 from krx_research.qt.models.assistant import AssistantReply
 from krx_research.qt.services.codex_subscription_backend import CodexSubscriptionBackend
 from krx_research.qt.presentation.column_catalog import label_for
+from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
 from krx_research.qt.services.assistant_workspace import OneOffWorkspace, ReusableCodeLibrary
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
@@ -341,7 +342,7 @@ request_chart({\"ticker\":\"6자리 코드\"})만 허용된다. 도구 결과가
                 top_n=int(args["top_n"]), include_price=bool(args["include_price"]),
                 include_volume=bool(args["include_volume"]),
             )
-            self._last_frame = pd.DataFrame(self._patterns.search(query))
+            self._last_frame = PatternResultPresenter().present(self._patterns.search(query))
             self._last_heading = "주가·이동평균 유사 패턴"
             return self._frame_result(self._last_frame, self._last_heading)
         if name == "run_one_off_python":

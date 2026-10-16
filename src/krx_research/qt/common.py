@@ -67,6 +67,20 @@ class DataFrameModel(QAbstractTableModel):
             return str(section + 1)
         return None
 
+    def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
+        if self._frame.empty or not 0 <= column < len(self._frame.columns):
+            return
+        name = self._frame.columns[column]
+        values = self._frame[name]
+        numeric = pd.to_numeric(values, errors="coerce")
+        key = numeric if numeric.notna().sum() == values.notna().sum() else values.astype(str).str.casefold()
+        self.layoutAboutToBeChanged.emit()
+        self._frame = (self._frame.assign(_sort_key=key)
+                       .sort_values("_sort_key", ascending=order == Qt.AscendingOrder,
+                                    kind="mergesort", na_position="last")
+                       .drop(columns="_sort_key").reset_index(drop=True))
+        self.layoutChanged.emit()
+
 
 class WorkerSignals(QObject):
     result = Signal(object)

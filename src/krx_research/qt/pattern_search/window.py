@@ -4,24 +4,25 @@ from pathlib import Path
 import re
 from typing import Callable
 
-import pandas as pd
-from PySide6.QtCore import QDate, QObject, QThread, Signal, Slot
+from PySide6.QtCore import QDate, QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget,
-    QTableWidgetItem, QVBoxLayout,
+    QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 
 from krx_research.database import resolve_database_target
 from krx_research.qt.chart_window import ChartWindow
 from krx_research.qt.presentation.column_catalog import label_for
+from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
 from krx_research.qt.services.chart_service import ChartService
 from krx_research.qt.services.box_breakout import BoxBreakoutQuery, BoxBreakoutSearchService
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
     PatternVectorCache, PostgreSQLPatternRepository,
 )
+from krx_research.qt.strategies.chart_navigation import SynchronizedChartStrategy
 from krx_research.ui.data import WorkstationData
+from krx_research.qt.widgets.result_table import ResultTable
 
 
 class SearchWorker(QObject):
@@ -48,10 +49,12 @@ class PatternSearchDialog(QDialog):
     def __init__(self, root: Path, parent=None, *, repository=None, chart_service=None):
         super().__init__(parent)
         self._root, self._thread, self._worker = Path(root), None, None
-        self._rows, self._charts = [], []
+        self._charts = []
         target = resolve_database_target(self._root, read_only=True) if repository is None or chart_service is None else None
         self._repository = repository or PostgreSQLPatternRepository(target)
         self._chart_service = chart_service or ChartService(WorkstationData(target))
+        self._presenter = PatternResultPresenter()
+        self._chart_strategy = SynchronizedChartStrategy(self._create_chart, self._keep_chart)
         self.setWindowTitle("메뉴 3 · 주가 패턴 검색")
         self.resize(1100, 720)
         self._build(); self._mode_changed(0)
@@ -74,7 +77,7 @@ class PatternSearchDialog(QDialog):
                               ("", self.volume), ("유사 결과 수", self.top)):
             form.addRow(label, widget)
         self.help = QLabel(); self.help.setWordWrap(True)
-        self.table = QTableWidget(); self.table.setAlternatingRowColors(True)
+        self.table = ResultTable()
         self.status = QLabel("조건을 입력한 뒤 검색하십시오.")
         self.search_button = QPushButton("검색")
         self.chart_button = QPushButton("선택 종목 차트"); self.chart_button.setEnabled(False)
@@ -85,7 +88,7 @@ class PatternSearchDialog(QDialog):
         layout.addWidget(self.status); layout.addWidget(self.table, 1); layout.addLayout(buttons)
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self.search_button.clicked.connect(self._search); self.close_button.clicked.connect(self.close)
-        self.chart_button.clicked.connect(self._open_chart); self.table.cellDoubleClicked.connect(self._open_chart)
+        self.chart_button.clicked.connect(self._open_chart); self.table.chartRequested.connect(self._open_chart)
 
     def _mode_changed(self, index: int) -> None:
         similar = index == 0
@@ -128,30 +131,36 @@ class PatternSearchDialog(QDialog):
 
     @Slot(list)
     def _show_rows(self, rows: list[dict]) -> None:
-        self._rows = rows
-        columns = list(rows[0]) if rows else []
-        self.table.setRowCount(len(rows)); self.table.setColumnCount(len(columns))
-        self.table.setHorizontalHeaderLabels([label_for(column) for column in columns])
-        for row_index, row in enumerate(rows):
-            for column_index, column in enumerate(columns):
-                value = row.get(column)
-                self.table.setItem(row_index, column_index, QTableWidgetItem("" if value is None else str(value)))
-        self.chart_button.setEnabled(bool(rows))
-        self.table.resizeColumnsToContents(); self.status.setText(f"검색 완료: {len(rows)}종목")
+        frame = self._presenter.present(rows)
+        self.table.set_frame(frame, header_labels={column: label_for(column) for column in frame.columns})
+        if "similarity_pct" in frame:
+            self.table.sortByColumn(frame.columns.get_loc("similarity_pct"), Qt.DescendingOrder)
+        self.chart_button.setEnabled(not frame.empty)
+        self.status.setText(f"검색 완료: {len(frame)}종목")
 
     def _open_chart(self, *_args) -> None:
-        row = self.table.currentRow()
-        if row < 0 or row >= len(self._rows):
+        ticker = self.table.current_ticker()
+        if not ticker:
             QMessageBox.information(self, "차트", "결과 종목을 선택하십시오."); return
-        ticker = str(self._rows[row]["stock_code"])
-        frame = pd.DataFrame(self._rows)
-        chart = ChartWindow(
-            self._chart_service, ticker, parent=self, navigation_enabled=True,
-            navigation_frame=frame, navigation_labels={column: label_for(column) for column in frame.columns},
+        frame = self.table.frame.copy()
+        self._chart_strategy.open(
+            ticker=ticker, quote_venue="KRX", parent=self, frame=frame,
+            labels={column: label_for(column) for column in frame.columns},
         )
+
+    def _create_chart(self, *, ticker: str, quote_venue: str, parent,
+                      navigation_enabled: bool, navigation_frame=None, navigation_labels=None):
+        return ChartWindow(
+            self._chart_service, ticker, quote_venue=quote_venue, parent=parent,
+            navigation_enabled=navigation_enabled, navigation_frame=navigation_frame,
+            navigation_labels=navigation_labels,
+        )
+
+    def _keep_chart(self, chart):
         self._charts.append(chart)
         chart.destroyed.connect(lambda _=None, item=chart: self._charts.remove(item) if item in self._charts else None)
         chart.show()
+        return chart
 
     @Slot(str)
     def _failed(self, message: str) -> None:

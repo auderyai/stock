@@ -27,13 +27,21 @@ class PatternSearchDialogTests(unittest.TestCase):
             dialog = PatternSearchDialog(
                 Path(directory), repository=MagicMock(), chart_service=MagicMock()
             )
-            dialog._show_rows([{"stock_code": "078350", "stock_name": "한양디지텍"}])
-            dialog.table.setCurrentCell(0, 0)
+            dialog._show_rows([
+                {"stock_code": "078350", "stock_name": "한양디지텍", "similarity_pct": 80},
+                {"stock_code": "000001", "stock_name": "상위종목", "similarity_pct": 95},
+            ])
+            self.assertEqual(dialog.table.frame.stock_code.tolist(), ["000001", "078350"])
+            dialog.table.select_ticker("078350")
             with patch("krx_research.qt.pattern_search.window.ChartWindow") as chart:
                 chart.return_value.destroyed.connect = MagicMock()
                 dialog._open_chart()
             self.assertTrue(chart.call_args.kwargs["navigation_enabled"])
             self.assertEqual(chart.call_args.args[1], "078350")
+            self.assertEqual(
+                chart.call_args.kwargs["navigation_frame"].stock_code.tolist(),
+                ["000001", "078350"],
+            )
             dialog.close()
 
     def test_box_mode_keeps_reference_security_and_hides_manual_thresholds(self):
