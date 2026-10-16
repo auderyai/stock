@@ -71,6 +71,8 @@ class ScreeningService:
             dates = self._repository.period_dates_with_membership(query.market, stored_dates)
             if not dates:
                 raise ValueError("선택한 기간에 필요한 PostgreSQL 거래일 또는 지수 구성종목 자료가 없습니다.")
+            if len(dates) < 2:
+                raise ValueError("기간 내 다빈도 종목은 서로 다른 거래일이 2일 이상 필요합니다.")
             appearances: dict[str, dict[str, ScreeningResult]] = {}
             for trade_date in dates:
                 for row in self._repository.run(replace(query, as_of_date=trade_date)):

@@ -96,7 +96,9 @@ class Stage4MainWindow(QMainWindow):
         for number, spec in enumerate(SCREENS, 1): self.screen_list.addItem(f"{number}. {spec.title}")
         left_layout.addWidget(self.screen_list, 1)
         buttons = QGridLayout(); self.run_button = QPushButton("선택 항목 조회 실행"); buttons.addWidget(self.run_button, 0, 0, 1, 2)
-        self.repeated_button = QPushButton("기간 내 다빈도 종목"); buttons.addWidget(self.repeated_button, 1, 0, 1, 2)
+        self.repeated_button = QPushButton("기간 내 다빈도 종목")
+        self.repeated_button.setToolTip("시작일~종료일의 각 거래일을 실행하고 2회 이상 선정된 종목과 날짜를 표시합니다.")
+        buttons.addWidget(self.repeated_button, 1, 0, 1, 2)
         actions = (("수급 대시보드", self._open_investor), ("종합·업종 지수", self._open_market_index),
                    ("일일 특징주", lambda: self._open_daily_research("featured")),
                    ("일일 테마", lambda: self._open_daily_research("theme")),
@@ -240,10 +242,12 @@ class Stage4MainWindow(QMainWindow):
         spec, period = self._selected_spec(), self._checked_period()
         if not spec: QMessageBox.information(self, "조회", "스크리닝 항목을 선택하십시오."); return
         if period is None or spec.kind is None: return
-        self.repeated_button.setEnabled(False); self.status.setText("기간 내 다빈도 종목을 집계하는 중입니다...")
+        self.repeated_button.setEnabled(False)
+        self.status.setText(f"{period.start} ~ {period.end} 각 거래일의 {spec.title}를 계산하는 중입니다...")
         comparison, low, high = self._comparison_code, self.near_low.value(), self.near_high.value()
+        limit = 500 if spec.kind is ScreeningKind.HIGH_52W else self.rank_limit.value()
         self._tasks.submit(
-            lambda: self._screening.run_repeated(spec.kind, period, limit=self.rank_limit.value(), market=spec.market,
+            lambda: self._screening.run_repeated(spec.kind, period, limit=limit, market=spec.market,
                                                   comparison_ticker=comparison, near_low=low, near_high=high),
             on_result=lambda rows: self._repeated_ready(rows, spec.title, period),
             on_error=lambda trace: self._show_error("기간 내 다빈도 종목 오류", trace),
@@ -254,7 +258,8 @@ class Stage4MainWindow(QMainWindow):
         window = RepeatedScreenWindow(self._screening, rows, title, period, self)
         window.stock_requested.connect(self.open_stock_chart); self._repeated_windows.append(window)
         window.destroyed.connect(lambda _=None, w=window: self._repeated_windows.remove(w) if w in self._repeated_windows else None)
-        window.show(); window.raise_(); self.status.setText(f"기간 내 2회 이상 등장 종목 {len(rows):,}개")
+        window.show(); window.raise_()
+        self.status.setText(f"선택기간의 각 거래일 계산 완료 · 2회 이상 등장 종목 {len(rows):,}개")
 
     def _populate_screening(self, rows: list[ScreeningResult]) -> None:
         self._result_ticker_column = 2
