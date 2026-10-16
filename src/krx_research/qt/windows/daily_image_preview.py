@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from numbers import Number
+import pandas as pd
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractItemView, QDialog, QDialogButtonBox, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout
+from krx_research.qt.widgets.result_table import ResultTable
 
 COLUMNS = (
     ("report_date", "기준일"), ("category", "테마·분류"), ("ticker", "종목코드"),
@@ -21,32 +21,11 @@ class DailyImagePreviewDialog(QDialog):
         super().__init__(parent); self.resize(1350, 650); self.setWindowTitle("이미지 분석·Stock DB 비교 확인")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Stock DB 값이 있는 항목은 DB 값으로 확정합니다. 확정 등록하면 같은 기준일의 기존 자료를 대체합니다."))
-        table = QTableWidget(len(rows), len(COLUMNS)); table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setHorizontalHeaderLabels([label for _, label in COLUMNS])
-        for column in range(len(COLUMNS)): table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignCenter)
-        for row_index, row in enumerate(rows):
-            for column_index, (key, _) in enumerate(COLUMNS):
-                value = row.get(key); item = QTableWidgetItem(self._text(value, key))
-                item.setTextAlignment(self._alignment(key, value)); table.setItem(row_index, column_index, item)
-        table.resizeColumnsToContents(); table.setColumnWidth(10, 480); layout.addWidget(table, 1)
+        table = ResultTable(); keys = [key for key, _ in COLUMNS]
+        table.set_frame(pd.DataFrame(rows).reindex(columns=keys), header_labels=dict(COLUMNS))
+        table.setColumnWidth(keys.index("reason"), 480); layout.addWidget(table, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Save).setText("확정 등록")
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
-
-    @staticmethod
-    def _text(value, column: str) -> str:
-        if value is None: return ""
-        if column == "ticker": return str(value).zfill(6)
-        if isinstance(value, Number) and not isinstance(value, bool):
-            decimals = 2 if "pct" in column else 1
-            return f"{float(value):,.{decimals}f}"
-        return str(value)
-
-    @staticmethod
-    def _alignment(column: str, value) -> int:
-        if column in {"report_date", "ticker"}: return int(Qt.AlignCenter)
-        if isinstance(value, Number) and not isinstance(value, bool): return int(Qt.AlignRight | Qt.AlignVCenter)
-        return int(Qt.AlignLeft | Qt.AlignVCenter)
-
 
 __all__ = ["DailyImagePreviewDialog"]

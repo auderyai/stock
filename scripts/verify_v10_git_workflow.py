@@ -20,8 +20,9 @@ if missing:
     raise SystemExit("Missing Git workflow files: " + ", ".join(missing))
 
 ignore = (root / ".gitignore").read_text(encoding="utf-8")
-for token in (".venv/", ".env", "*.db", "*.sqlite"):
-    if token not in ignore:
+for alternatives in ((".venv", ".venv/"), (".env",), ("*.db",), ("*.sqlite",)):
+    if not any(token in ignore for token in alternatives):
+        token = alternatives[0]
         raise SystemExit(f".gitignore missing: {token}")
 
 # Installed new_stock must preserve the real repository and keep Git helpers

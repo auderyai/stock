@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import pandas as pd
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QInputDialog,
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from krx_research.qt.workers.task_runner import TaskRunner
+from krx_research.qt.widgets.result_table import ResultTable
 
 
 class _RegistrationDialog(QDialog):
@@ -34,38 +36,41 @@ class ReusableCodeWindow(QMainWindow):
         split = QSplitter(Qt.Vertical); layout.addWidget(split, 1)
         first, first_layout = QWidget(), QVBoxLayout(); first.setLayout(first_layout)
         row = QHBoxLayout(); row.addWidget(QLabel("1회용 실행 이력")); row.addStretch(1); button = QPushButton("선택 코드 검토·정식 등록"); button.clicked.connect(self._register); row.addWidget(button); first_layout.addLayout(row)
-        self.history = self._table(("실행 시각", "실행 ID", "코드 해시", "동일 코드 실행", "검토 상태", "실행 상태", "출처")); first_layout.addWidget(self.history); split.addWidget(first)
+        self.history = ResultTable(identity_width=0); first_layout.addWidget(self.history); split.addWidget(first)
         second, second_layout = QWidget(), QVBoxLayout(); second.setLayout(second_layout)
         row = QHBoxLayout(); row.addWidget(QLabel("정식 등록 코드")); row.addStretch(1); button = QPushButton("선택 코드 재사용"); button.clicked.connect(self._execute); row.addWidget(button); refresh = QPushButton("새로고침"); refresh.clicked.connect(self.refresh); row.addWidget(refresh); second_layout.addLayout(row)
-        self.library = self._table(("등록 이름", "버전", "버전 수", "사용 횟수", "마지막 사용", "설명")); second_layout.addWidget(self.library); split.addWidget(second)
+        self.library = ResultTable(identity_width=0); second_layout.addWidget(self.library); split.addWidget(second)
         self.status = QLabel(); layout.addWidget(self.status); split.setSizes([380, 300])
 
     @staticmethod
-    def _table(headers):
-        table = QTableWidget(0, len(headers)); table.setHorizontalHeaderLabels(headers); table.setSelectionBehavior(QAbstractItemView.SelectRows); table.setSelectionMode(QAbstractItemView.SingleSelection); table.setEditTriggers(QAbstractItemView.NoEditTriggers); table.verticalHeader().setVisible(False); return table
+    def _fill(table, rows, columns, labels, identity):
+        frame = pd.DataFrame(({key: value(row) for key, value in columns.items()} for row in rows))
+        frame[identity] = [row.get(identity) for row in rows]
+        table.set_frame(frame, header_labels=labels)
+        table.setColumnHidden(frame.columns.get_loc(identity), True)
 
     @staticmethod
-    def _fill(table, rows, values, identity):
-        table.setRowCount(len(rows))
-        for r, record in enumerate(rows):
-            for c, value in enumerate(values(record)):
-                item = QTableWidgetItem("" if value is None else str(value)); item.setTextAlignment(Qt.AlignCenter if c < 5 else Qt.AlignLeft); table.setItem(r, c, item)
-            table.item(r, 0).setData(Qt.UserRole, record.get(identity))
-        table.resizeColumnsToContents()
-
-    @staticmethod
-    def _selected(table):
-        item = table.item(table.currentRow(), 0) if table.currentRow() >= 0 else None
-        return item.data(Qt.UserRole) if item else None
+    def _selected(table, identity):
+        index = table.currentIndex()
+        return None if not index.isValid() else table.frame.iloc[index.row()].get(identity)
 
     def refresh(self):
         runs, codes = self._assistant.one_off_runs(), self._assistant.reusable_codes()
-        self._fill(self.history, runs, lambda row: (row.get("created_at"), row.get("run_id"), str(row.get("code_hash") or "")[:12], row.get("repeat_count", 0), "정식 등록 검토 권장" if row.get("promotion_recommended") else "", row.get("status"), row.get("origin")), "run_id")
-        self._fill(self.library, codes, lambda row: (row.get("name"), row.get("active_version"), row.get("version_count"), row.get("use_count"), row.get("last_used_at"), row.get("description")), "library_id")
+        self._fill(self.history, runs, {
+            "created_at": lambda r: r.get("created_at"), "run_id_text": lambda r: r.get("run_id"),
+            "code_hash": lambda r: str(r.get("code_hash") or "")[:12], "repeat_count": lambda r: r.get("repeat_count", 0),
+            "review": lambda r: "정식 등록 검토 권장" if r.get("promotion_recommended") else "",
+            "status": lambda r: r.get("status"), "origin": lambda r: r.get("origin"),
+        }, {"created_at": "실행 시각", "run_id_text": "실행 ID", "code_hash": "코드 해시", "repeat_count": "동일 코드 실행", "review": "검토 상태", "status": "실행 상태", "origin": "출처"}, "run_id")
+        self._fill(self.library, codes, {
+            "name": lambda r: r.get("name"), "active_version": lambda r: r.get("active_version"),
+            "version_count": lambda r: r.get("version_count"), "use_count": lambda r: r.get("use_count"),
+            "last_used_at": lambda r: r.get("last_used_at"), "description": lambda r: r.get("description"),
+        }, {"name": "등록 이름", "active_version": "버전", "version_count": "버전 수", "use_count": "사용 횟수", "last_used_at": "마지막 사용", "description": "설명"}, "library_id")
         self.status.setText(f"실행 이력 {len(runs):,}건 · 정식 등록 코드 {len(codes):,}건")
 
     def _register(self):
-        run_id = self._selected(self.history)
+        run_id = self._selected(self.history, "run_id")
         if not run_id: QMessageBox.information(self, "정식 등록", "1회용 실행 이력을 선택하십시오."); return
         try: code = self._assistant.one_off_code(run_id)
         except Exception as error: QMessageBox.critical(self, "코드 읽기 오류", str(error)); return
@@ -76,7 +81,7 @@ class ReusableCodeWindow(QMainWindow):
         self.refresh(); self.status.setText(f"정식 등록 완료: {row['name']} · 버전 {row['active_version']}")
 
     def _execute(self):
-        library_id = self._selected(self.library)
+        library_id = self._selected(self.library, "library_id")
         if not library_id: QMessageBox.information(self, "코드 재사용", "정식 등록 코드를 선택하십시오."); return
         text, accepted = QInputDialog.getMultiLineText(self, "등록 코드 재사용", "입력 JSON", "{}")
         if not accepted: return
