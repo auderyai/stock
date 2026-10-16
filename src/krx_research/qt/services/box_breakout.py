@@ -55,8 +55,6 @@ class PeriodPatternSearchService:
         reference = self._pattern(groups.get(security.code))
         if reference is None:
             raise ValueError(f"{security.name}의 지정 기간 패턴 관측치가 부족합니다.")
-        if not reference.trend.accepted:
-            raise ValueError("지정 기간의 기준 종목이 상승 추세 조건을 충족하지 않습니다.")
         latest = self.repository.latest_date()
         recent_history = self.repository.history(
             latest - timedelta(days=reference.observations * 3), latest

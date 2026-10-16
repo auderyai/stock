@@ -129,19 +129,24 @@ class PatternSimilarityTests(unittest.TestCase):
         repository = FakeRepository()
         reference_dates = pd.bdate_range("2026-04-01", periods=30)
         recent_dates = pd.bdate_range("2026-09-01", periods=30)
-        shape = np.linspace(100, 130, len(reference_dates)) + np.sin(
+        reference_shape = np.linspace(130, 100, len(reference_dates)) + np.sin(
             np.linspace(0, 5, len(reference_dates))
         )
-        target = repository._frame("078350", "기준종목", reference_dates, shape)
-        similar = repository._frame("000003", "유사종목", recent_dates, shape * .5)
-        opposite = repository._frame("000004", "반대종목", recent_dates, shape[::-1])
+        recent_shape = np.linspace(100, 130, len(recent_dates)) + np.sin(
+            np.linspace(0, 5, len(recent_dates))
+        )
+        target = repository._frame("078350", "기준종목", reference_dates, reference_shape)
+        similar = repository._frame("000003", "유사종목", recent_dates, recent_shape)
+        opposite = repository._frame("000004", "하락종목", recent_dates, recent_shape[::-1])
         repository.frame = pd.concat([target, similar, opposite], ignore_index=True)
         rows = PeriodPatternSearchService(repository).search(PeriodPatternQuery(
             "078350", reference_dates[0].date(), reference_dates[-1].date(), top_n=1,
         ))
         self.assertEqual([row["stock_code"] for row in rows], ["078350", "000003"])
         self.assertEqual(rows[0]["pattern_role"], "기준 패턴")
+        self.assertLess(rows[0]["period_return_pct"], 0)
         self.assertEqual(rows[1]["pattern_role"], "최신 유사 패턴")
+        self.assertGreater(rows[1]["period_return_pct"], 0)
         self.assertNotIn("breakout_date", rows[0])
         self.assertEqual(rows[0]["pattern_start"], reference_dates[0].date())
         self.assertEqual(rows[0]["pattern_end"], reference_dates[-1].date())

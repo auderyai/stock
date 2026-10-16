@@ -375,11 +375,6 @@ class PatternSimilaritySearchService:
         reference = vectorizer.vectorize(reference_groups[security.code], query.start, query.end)
         if reference is None:
             raise ValueError("기준 종목의 유효한 패턴 관측치가 부족합니다.")
-        reference_trend = self.trend_policy.assess(
-            reference_groups[security.code], reference.start, reference.end
-        )
-        if not reference_trend.accepted:
-            raise ValueError("지정 기간의 기준 종목이 상승 추세 조건을 충족하지 않습니다.")
         latest = self.repository.latest_date()
         recent_start = latest - timedelta(days=(reference.observations + max(query.averages.periods)) * 3)
         recent_history = self.repository.history(recent_start, latest)
