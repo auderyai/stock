@@ -13,7 +13,7 @@ from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
     PatternSimilarity, PatternVector, PatternVectorCache, PatternVectorizer, Security,
 )
-from krx_research.qt.services.pattern_policy import UptrendPolicy
+from krx_research.qt.services.pattern_policy import PatternQualityPolicy, UptrendPolicy
 
 
 class FakeRepository:
@@ -56,6 +56,16 @@ class PatternSimilarityTests(unittest.TestCase):
         self.assertTrue(policy.assess(frame(np.linspace(100, 130, 30))).accepted)
         self.assertFalse(policy.assess(frame(np.full(30, 100))).accepted)
         self.assertFalse(policy.assess(frame(np.linspace(130, 100, 30))).accepted)
+
+    def test_quality_policy_excludes_discontinuity_and_long_term_bottom(self):
+        dates = pd.bdate_range("2024-01-01", periods=300)
+        frame = lambda close: FakeRepository._frame("000001", "검사", dates, close)
+        policy = PatternQualityPolicy()
+        self.assertTrue(policy.assess(frame(np.linspace(100, 160, 300))).accepted)
+        discontinuous = np.r_[np.linspace(100, 120, 150), np.linspace(600, 650, 150)]
+        self.assertFalse(policy.assess(frame(discontinuous)).accepted)
+        bottom = np.r_[np.linspace(500, 100, 150), np.linspace(100, 120, 150)]
+        self.assertFalse(policy.assess(frame(bottom)).accepted)
 
     def test_vectorizer_supports_user_selected_average(self):
         repository = FakeRepository()

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .pattern_similarity import PatternRepository, PatternSimilarity, TimeSeriesVectorizer
-from .pattern_policy import TrendAssessment, UptrendPolicy
+from .pattern_policy import PatternQualityPolicy, QualityAssessment, TrendAssessment, UptrendPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +37,7 @@ class PeriodPattern:
     start: date
     end: date
     trend: TrendAssessment
+    quality: QualityAssessment
 
 
 class PeriodPatternSearchService:
@@ -45,6 +46,7 @@ class PeriodPatternSearchService:
     def __init__(self, repository: PatternRepository):
         self.repository = repository
         self.trend_policy = UptrendPolicy()
+        self.quality_policy = PatternQualityPolicy()
 
     def search(self, query: PeriodPatternQuery) -> list[dict]:
         security = self.repository.resolve(query.security)
@@ -57,7 +59,8 @@ class PeriodPatternSearchService:
             raise ValueError(f"{security.name}의 지정 기간 패턴 관측치가 부족합니다.")
         latest = self.repository.latest_date()
         recent_history = self.repository.history(
-            latest - timedelta(days=reference.observations * 3), latest
+            min(latest - timedelta(days=730),
+                latest - timedelta(days=reference.observations * 3)), latest
         )
         groups = {
             str(code): frame for code, frame in recent_history.groupby("stock_code", sort=False)
@@ -69,7 +72,7 @@ class PeriodPatternSearchService:
             candidate = self._pattern(frame, reference.observations)
             if (candidate is None or candidate.end != latest or
                     candidate.observations < reference.observations * 0.8 or
-                    not candidate.trend.accepted):
+                    not candidate.trend.accepted or not candidate.quality.accepted):
                 continue
             scores = self._compare(reference, candidate)
             matches.append((scores["similarity"], code, candidate, scores))
@@ -102,12 +105,14 @@ class PeriodPatternSearchService:
         }
         channels["volume"] = vectorizer.volume(data.volume.to_numpy(dtype=float))
         trend = self.trend_policy.assess(data)
+        quality = self.quality_policy.assess(frame)
         return PeriodPattern(
             str(data.stock_code.iloc[-1]), str(data.stock_name.iloc[-1]), len(data), channels,
             (close[-1] / close[0] - 1) * 100,
             (float(data.high.max()) / float(data.low.min()) - 1) * 100,
             data.trade_date.iloc[0].date(), data.trade_date.iloc[-1].date(),
             trend,
+            quality,
         )
 
     @staticmethod
@@ -136,6 +141,8 @@ class PeriodPatternSearchService:
             "period_range_pct": round(pattern.range_pct, 2),
             "trend_slope_pct": round(pattern.trend.slope_pct, 4),
             "range_position_pct": round(pattern.trend.range_position_pct, 2),
+            "maximum_gap_pct": round(pattern.quality.maximum_gap_pct, 2),
+            "history_range_position_pct": round(pattern.quality.history_range_position_pct, 2),
             "db_recent_date": value("trade_date"), "rise_pct": value("rise_pct"),
             "close": value("close"), "market_cap_eok": eok("market_cap"),
             "trading_value_eok": eok("trading_value"),

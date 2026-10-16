@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from krx_research.database import open_research_store
-from .pattern_policy import TrendAssessment, UptrendPolicy
+from .pattern_policy import PatternQualityPolicy, QualityAssessment, TrendAssessment, UptrendPolicy
 
 
 class MovingAverageKind(StrEnum):
@@ -356,6 +356,7 @@ class PatternSimilaritySearchService:
                  trend_policy: UptrendPolicy | None = None):
         self.repository, self.cache = repository, cache
         self.trend_policy = trend_policy or UptrendPolicy()
+        self.quality_policy = PatternQualityPolicy()
 
     def suggest_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]:
         return self.repository.search_securities(query, limit)
@@ -376,7 +377,10 @@ class PatternSimilaritySearchService:
         if reference is None:
             raise ValueError("기준 종목의 유효한 패턴 관측치가 부족합니다.")
         latest = self.repository.latest_date()
-        recent_start = latest - timedelta(days=(reference.observations + max(query.averages.periods)) * 3)
+        recent_start = min(
+            latest - timedelta(days=730),
+            latest - timedelta(days=(reference.observations + max(query.averages.periods)) * 3),
+        )
         recent_history = self.repository.history(recent_start, latest)
         groups = {str(code): group for code, group in recent_history.groupby("stock_code", sort=False)}
         cached = self.cache.load(query) if self.cache else {}
@@ -402,16 +406,18 @@ class PatternSimilaritySearchService:
                     candidate.observations < reference.observations * 0.8):
                 continue
             trend = self.trend_policy.assess(frame, candidate.start, candidate.end)
-            if not trend.accepted:
+            quality = self.quality_policy.assess(frame)
+            if not trend.accepted or not quality.accepted:
                 continue
             scores = PatternSimilarity.compare(reference, candidate)
-            matches.append((scores["similarity"], code, str(frame.stock_name.iloc[-1]), scores, trend))
+            matches.append((scores["similarity"], code, str(frame.stock_name.iloc[-1]),
+                            scores, trend, quality))
         matches.sort(reverse=True)
         selected = matches[: query.top_n]
         snapshots = self.repository.latest([item[1] for item in selected])
-        return [self._row(code, name, scores, trend, vectors[code][1],
+        return [self._row(code, name, scores, trend, quality, vectors[code][1],
                           snapshots.get(code, {}), query)
-                for _, code, name, scores, trend in selected]
+                for _, code, name, scores, trend, quality in selected]
 
     @staticmethod
     def _fingerprint(frame: pd.DataFrame) -> str:
@@ -420,6 +426,7 @@ class PatternSimilaritySearchService:
 
     @staticmethod
     def _row(code: str, name: str, scores: dict, trend: TrendAssessment,
+             quality: QualityAssessment,
              vector: PatternVector, snapshot: dict, query: PatternSearchQuery) -> dict:
         value = lambda key: snapshot.get(key)
         return {
@@ -440,6 +447,8 @@ class PatternSimilaritySearchService:
             "period_return_pct": round(trend.return_pct, 2),
             "trend_slope_pct": round(trend.slope_pct, 4),
             "range_position_pct": round(trend.range_position_pct, 2),
+            "maximum_gap_pct": round(quality.maximum_gap_pct, 2),
+            "history_range_position_pct": round(quality.history_range_position_pct, 2),
             "db_recent_date": value("trade_date"),
             "rise_pct": PatternSimilaritySearchService._round(value("rise_pct")),
             "close": value("close"), "open": value("open"),

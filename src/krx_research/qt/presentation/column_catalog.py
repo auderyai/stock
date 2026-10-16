@@ -108,6 +108,8 @@ COLUMN_LABELS: dict[str, str] = {
     "period_return_pct": "기간 수익률(%)",
     "trend_slope_pct": "일평균 추세기울기(%)",
     "range_position_pct": "구간 내 종가 위치(%)",
+    "maximum_gap_pct": "최대 일간 단절(%)",
+    "history_range_position_pct": "2년 범위 내 종가 위치(%)",
     "period_range_pct": "기간 고저폭(%)",
     "pattern_role": "구분",
 }
