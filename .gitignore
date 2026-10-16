@@ -237,6 +237,7 @@ desktop.ini
 logs/
 log/
 LOGS/
+assistant_workspace/runs/
 *.tmp
 *.bak
 *.zip

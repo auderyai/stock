@@ -54,6 +54,7 @@ class OneOffWorkspace:
         wrapper = (
             "import json\n"
             "with open('input.json',encoding='utf-8') as f: input_data=json.load(f)\n"
+            "data=rows=input_data\n"
             f"{code.rstrip()}\n"
             "print(json.dumps(result,ensure_ascii=False,default=str))\n"
         )
@@ -66,7 +67,7 @@ class OneOffWorkspace:
         }
         try:
             completed = subprocess.run(
-                [sys.executable, "-I", str(script)], cwd=job, env=env, capture_output=True,
+                [sys.executable, "-I", "-X", "utf8", str(script)], cwd=job, env=env, capture_output=True,
                 text=True, encoding="utf-8", errors="replace", timeout=self.timeout_seconds,
             )
         except subprocess.TimeoutExpired as error:

@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from datetime import date
 import unittest
+from unittest.mock import patch
 
 from krx_research.qt.services.assistant_service import ReadOnlyDatabaseTool
 from krx_research.qt.services.assistant_service import AssistantService
@@ -46,6 +47,23 @@ class AssistantBoundaryTests(unittest.TestCase):
         for sql in statements:
             with self.subTest(sql=sql), self.assertRaises(ValueError):
                 ReadOnlyDatabaseTool(None).query(sql)
+
+    def test_read_only_sql_rejects_incomplete_analysis_input(self):
+        tool = ReadOnlyDatabaseTool(None, max_limit=2)
+
+        class Connection:
+            def execute(self, _sql): return self
+            def fetchall(self): return [{"value": 1}, {"value": 2}, {"value": 3}]
+
+        class Store:
+            conn = Connection()
+            def __enter__(self): return self
+            def __exit__(self, *_args): pass
+
+        with patch("krx_research.qt.services.assistant_service.open_research_store",
+                   return_value=Store()):
+            with self.assertRaisesRegex(ValueError, "2행을 초과"):
+                tool.query("SELECT value FROM x", limit=2, require_complete=True)
 
     def test_assistant_rejects_reversed_period_before_provider_call(self):
         service = AssistantService(None, provider="codex", codex_backend=object())
@@ -212,9 +230,30 @@ class AssistantBoundaryTests(unittest.TestCase):
                 '"code":"result = [{\'stock_code\': row[\'stock_code\']} for row in input_data]"}',
             )
             self.assertIn("'005930'", queries[0][0])
-            self.assertEqual(queries[0][1], {"limit": 50_000})
+            self.assertEqual(queries[0][1], {"limit": 500_000, "require_complete": True})
             self.assertEqual(output["input_row_count"], 1)
             self.assertEqual(len(service.one_off_runs()), 1)
+
+    def test_one_off_workspace_accepts_common_input_aliases(self):
+        with TemporaryDirectory() as directory:
+            workspace = OneOffWorkspace(Path(directory))
+            self.assertEqual(workspace.execute("result = len(data) + len(rows)", [1, 2]), 4)
+            self.assertEqual(workspace.execute("result = input_data", "한양디지텍"), "한양디지텍")
+
+    def test_one_off_database_result_is_bounded_for_planner(self):
+        with TemporaryDirectory() as directory:
+            service = AssistantService(None, Path(directory), provider="codex", codex_backend=object())
+            service._database.query = lambda _sql, **_kwargs: __import__("pandas").DataFrame(
+                [{"value": value} for value in range(150)]
+            )
+            output = service._call_tool(
+                "run_one_off_query_python",
+                '{"sql":"SELECT value FROM prices", "code":"result = input_data"}',
+            )
+            self.assertEqual(output["result_row_count"], 150)
+            self.assertEqual(len(output["result"]), 100)
+            self.assertTrue(output["truncated_for_model"])
+            self.assertEqual(len(service._last_frame), 150)
 
     def test_numbered_screen_uses_existing_runner_and_reuses_cached_result(self):
         service = AssistantService(None, provider="codex", codex_backend=object())
