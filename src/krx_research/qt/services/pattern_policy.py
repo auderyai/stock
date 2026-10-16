@@ -32,6 +32,15 @@ class RisingWaveAssessment:
     trading_days: int
 
 
+@dataclass(frozen=True, slots=True)
+class LongTermTrendAssessment:
+    accepted: bool
+    close_over_ma60_pct: float
+    close_over_ma120_pct: float
+    ma60_over_ma120_pct: float
+    ma120_change_pct: float
+
+
 class UptrendPolicy:
     """Admits only rising patterns that finish in the upper price range."""
 
@@ -80,17 +89,18 @@ class RisingWavePolicy:
 
     def __init__(self, minimum_gain_pct: float = 10.0, minimum_days: int = 5,
                  maximum_days: int = 40, minimum_up_days: int = 3,
-                 maximum_single_day_share: float = 0.6):
+                 maximum_single_day_share: float = 0.6, lookback_days: int = 120):
         self.minimum_gain = minimum_gain_pct / 100.0
         self.minimum_days, self.maximum_days = int(minimum_days), int(maximum_days)
         self.minimum_up_days = int(minimum_up_days)
         self.maximum_single_day_share = float(maximum_single_day_share)
+        self.lookback_days = int(lookback_days)
 
     def assess(self, frame: pd.DataFrame) -> RisingWaveAssessment:
         close = pd.to_numeric(
             frame.sort_values("trade_date").drop_duplicates("trade_date").close,
             errors="coerce",
-        ).dropna().to_numpy(dtype=float)
+        ).dropna().tail(self.lookback_days).to_numpy(dtype=float)
         if len(close) < self.minimum_days:
             return RisingWaveAssessment(False, 0.0, 0)
         daily = np.diff(close) / close[:-1]
@@ -109,3 +119,27 @@ class RisingWavePolicy:
                 if gain > best_gain:
                     best_gain, best_days = gain, days
         return RisingWaveAssessment(best_days > 0, best_gain * 100.0, best_days)
+
+
+class LongTermTrendPolicy:
+    """Requires a rising 60/120-day structure without a one-candle overextension."""
+
+    def __init__(self, maximum_ma60_extension_pct: float = 30.0):
+        self.maximum_extension = float(maximum_ma60_extension_pct)
+
+    def assess(self, frame: pd.DataFrame) -> LongTermTrendAssessment:
+        close = pd.to_numeric(
+            frame.sort_values("trade_date").drop_duplicates("trade_date").close,
+            errors="coerce",
+        ).dropna()
+        if len(close) < 140:
+            return LongTermTrendAssessment(False, *(float("nan"),) * 4)
+        ma60, ma120 = close.rolling(60).mean(), close.rolling(120).mean()
+        latest = float(close.iloc[-1])
+        over60 = (latest / float(ma60.iloc[-1]) - 1.0) * 100
+        over120 = (latest / float(ma120.iloc[-1]) - 1.0) * 100
+        alignment = (float(ma60.iloc[-1]) / float(ma120.iloc[-1]) - 1.0) * 100
+        direction = (float(ma120.iloc[-1]) / float(ma120.iloc[-21]) - 1.0) * 100
+        accepted = (0 < over60 <= self.maximum_extension and over120 > 0 and
+                    alignment > 0 and direction > 0)
+        return LongTermTrendAssessment(accepted, over60, over120, alignment, direction)

@@ -14,14 +14,14 @@ from krx_research.qt.services.pattern_similarity import (
     PatternSimilarity, PatternVector, PatternVectorCache, PatternVectorizer, Security,
 )
 from krx_research.qt.services.pattern_policy import (
-    PatternQualityPolicy, RisingWavePolicy, UptrendPolicy,
+    LongTermTrendPolicy, PatternQualityPolicy, RisingWavePolicy, UptrendPolicy,
 )
 
 
 class FakeRepository:
     def __init__(self):
-        dates = pd.bdate_range("2026-01-01", periods=120)
-        shape = np.linspace(0, 18, len(dates)) + np.sin(np.linspace(0, 12, len(dates))) * 4
+        dates = pd.bdate_range("2026-01-01", periods=180)
+        shape = np.linspace(0, 60, len(dates)) + np.sin(np.linspace(0, 12, len(dates))) * 4
         self.frame = pd.concat([
             self._frame("078350", "한양디지텍", dates, 100 + shape),
             self._frame("000001", "유사종목", dates, 50 + shape / 2),
@@ -79,6 +79,15 @@ class PatternSimilarityTests(unittest.TestCase):
         assessment = policy.assess(frame(multi_day))
         self.assertTrue(assessment.accepted)
         self.assertGreaterEqual(assessment.trading_days, 5)
+
+    def test_long_term_policy_rejects_downtrend_and_one_candle_extension(self):
+        dates = pd.bdate_range("2025-01-01", periods=300)
+        frame = lambda close: FakeRepository._frame("000001", "검사", dates, close)
+        policy = LongTermTrendPolicy()
+        self.assertTrue(policy.assess(frame(np.linspace(100, 180, 300))).accepted)
+        self.assertFalse(policy.assess(frame(np.linspace(180, 100, 300))).accepted)
+        one_candle = np.r_[np.linspace(100, 110, 299), 180.0]
+        self.assertFalse(policy.assess(frame(one_candle)).accepted)
 
     def test_vectorizer_supports_user_selected_average(self):
         repository = FakeRepository()
@@ -151,11 +160,11 @@ class PatternSimilarityTests(unittest.TestCase):
     def test_period_pattern_does_not_infer_a_breakout_event(self):
         repository = FakeRepository()
         reference_dates = pd.bdate_range("2026-04-01", periods=30)
-        recent_dates = pd.bdate_range("2026-09-01", periods=30)
+        recent_dates = pd.bdate_range("2026-02-01", periods=160)
         reference_shape = np.linspace(130, 100, len(reference_dates)) + np.sin(
             np.linspace(0, 5, len(reference_dates))
         )
-        recent_shape = np.linspace(100, 130, len(recent_dates)) + np.sin(
+        recent_shape = np.linspace(100, 160, len(recent_dates)) + np.sin(
             np.linspace(0, 5, len(recent_dates))
         )
         target = repository._frame("078350", "기준종목", reference_dates, reference_shape)
@@ -173,7 +182,7 @@ class PatternSimilarityTests(unittest.TestCase):
         self.assertNotIn("breakout_date", rows[0])
         self.assertEqual(rows[0]["pattern_start"], reference_dates[0].date())
         self.assertEqual(rows[0]["pattern_end"], reference_dates[-1].date())
-        self.assertEqual(rows[1]["pattern_start"], recent_dates[0].date())
+        self.assertEqual(rows[1]["pattern_start"], recent_dates[-30].date())
         self.assertEqual(rows[1]["pattern_end"], recent_dates[-1].date())
 
     def test_assistant_routes_pattern_search_to_registered_service(self):

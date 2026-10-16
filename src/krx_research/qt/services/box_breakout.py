@@ -8,8 +8,8 @@ import pandas as pd
 
 from .pattern_similarity import PatternRepository, PatternSimilarity, TimeSeriesVectorizer
 from .pattern_policy import (
-    PatternQualityPolicy, QualityAssessment, RisingWaveAssessment, RisingWavePolicy,
-    TrendAssessment, UptrendPolicy,
+    LongTermTrendAssessment, LongTermTrendPolicy, PatternQualityPolicy, QualityAssessment,
+    RisingWaveAssessment, RisingWavePolicy, TrendAssessment, UptrendPolicy,
 )
 
 
@@ -42,6 +42,7 @@ class PeriodPattern:
     trend: TrendAssessment
     quality: QualityAssessment
     wave: RisingWaveAssessment
+    long_term: LongTermTrendAssessment
 
 
 class PeriodPatternSearchService:
@@ -52,6 +53,7 @@ class PeriodPatternSearchService:
         self.trend_policy = UptrendPolicy()
         self.quality_policy = PatternQualityPolicy()
         self.wave_policy = RisingWavePolicy()
+        self.long_term_policy = LongTermTrendPolicy()
 
     def search(self, query: PeriodPatternQuery) -> list[dict]:
         security = self.repository.resolve(query.security)
@@ -78,7 +80,7 @@ class PeriodPatternSearchService:
             if (candidate is None or candidate.end != latest or
                     candidate.observations < reference.observations * 0.8 or
                     not candidate.trend.accepted or not candidate.quality.accepted or
-                    not candidate.wave.accepted):
+                    not candidate.wave.accepted or not candidate.long_term.accepted):
                 continue
             scores = self._compare(reference, candidate)
             matches.append((scores["similarity"], code, candidate, scores))
@@ -113,6 +115,7 @@ class PeriodPatternSearchService:
         trend = self.trend_policy.assess(data)
         quality = self.quality_policy.assess(frame)
         wave = self.wave_policy.assess(frame)
+        long_term = self.long_term_policy.assess(frame)
         return PeriodPattern(
             str(data.stock_code.iloc[-1]), str(data.stock_name.iloc[-1]), len(data), channels,
             (close[-1] / close[0] - 1) * 100,
@@ -121,6 +124,7 @@ class PeriodPatternSearchService:
             trend,
             quality,
             wave,
+            long_term,
         )
 
     @staticmethod
@@ -153,6 +157,9 @@ class PeriodPatternSearchService:
             "history_range_position_pct": round(pattern.quality.history_range_position_pct, 2),
             "rising_wave_pct": round(pattern.wave.gain_pct, 2),
             "rising_wave_days": pattern.wave.trading_days,
+            "close_over_ma60_pct": round(pattern.long_term.close_over_ma60_pct, 2),
+            "ma60_over_ma120_pct": round(pattern.long_term.ma60_over_ma120_pct, 2),
+            "ma120_change_pct": round(pattern.long_term.ma120_change_pct, 2),
             "db_recent_date": value("trade_date"), "rise_pct": value("rise_pct"),
             "close": value("close"), "market_cap_eok": eok("market_cap"),
             "trading_value_eok": eok("trading_value"),

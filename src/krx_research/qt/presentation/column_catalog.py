@@ -112,6 +112,9 @@ COLUMN_LABELS: dict[str, str] = {
     "history_range_position_pct": "2년 범위 내 종가 위치(%)",
     "rising_wave_pct": "확인 상승파동(%)",
     "rising_wave_days": "상승파동 거래일",
+    "close_over_ma60_pct": "종가/60일선(%)",
+    "ma60_over_ma120_pct": "60일선/120일선(%)",
+    "ma120_change_pct": "120일선 20일 변화(%)",
     "period_range_pct": "기간 고저폭(%)",
     "pattern_role": "구분",
 }

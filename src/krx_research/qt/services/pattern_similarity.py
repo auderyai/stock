@@ -14,8 +14,8 @@ import pandas as pd
 
 from krx_research.database import open_research_store
 from .pattern_policy import (
-    PatternQualityPolicy, QualityAssessment, RisingWaveAssessment, RisingWavePolicy,
-    TrendAssessment, UptrendPolicy,
+    LongTermTrendAssessment, LongTermTrendPolicy, PatternQualityPolicy, QualityAssessment,
+    RisingWaveAssessment, RisingWavePolicy, TrendAssessment, UptrendPolicy,
 )
 
 
@@ -361,6 +361,7 @@ class PatternSimilaritySearchService:
         self.trend_policy = trend_policy or UptrendPolicy()
         self.quality_policy = PatternQualityPolicy()
         self.wave_policy = RisingWavePolicy()
+        self.long_term_policy = LongTermTrendPolicy()
 
     def suggest_securities(self, query: str, limit: int = 20) -> list[dict[str, str]]:
         return self.repository.search_securities(query, limit)
@@ -412,17 +413,19 @@ class PatternSimilaritySearchService:
             trend = self.trend_policy.assess(frame, candidate.start, candidate.end)
             quality = self.quality_policy.assess(frame)
             wave = self.wave_policy.assess(frame)
-            if not trend.accepted or not quality.accepted or not wave.accepted:
+            long_term = self.long_term_policy.assess(frame)
+            if not all((trend.accepted, quality.accepted, wave.accepted, long_term.accepted)):
                 continue
             scores = PatternSimilarity.compare(reference, candidate)
             matches.append((scores["similarity"], code, str(frame.stock_name.iloc[-1]),
-                            scores, trend, quality, wave))
+                            scores, trend, quality, wave, long_term))
         matches.sort(reverse=True)
         selected = matches[: query.top_n]
         snapshots = self.repository.latest([item[1] for item in selected])
-        return [self._row(code, name, scores, trend, quality, wave, vectors[code][1],
+        return [self._row(code, name, scores, trend, quality, wave, long_term,
+                          vectors[code][1],
                           snapshots.get(code, {}), query)
-                for _, code, name, scores, trend, quality, wave in selected]
+                for _, code, name, scores, trend, quality, wave, long_term in selected]
 
     @staticmethod
     def _fingerprint(frame: pd.DataFrame) -> str:
@@ -432,6 +435,7 @@ class PatternSimilaritySearchService:
     @staticmethod
     def _row(code: str, name: str, scores: dict, trend: TrendAssessment,
              quality: QualityAssessment, wave: RisingWaveAssessment,
+             long_term: LongTermTrendAssessment,
              vector: PatternVector, snapshot: dict, query: PatternSearchQuery) -> dict:
         value = lambda key: snapshot.get(key)
         return {
@@ -456,6 +460,9 @@ class PatternSimilaritySearchService:
             "history_range_position_pct": round(quality.history_range_position_pct, 2),
             "rising_wave_pct": round(wave.gain_pct, 2),
             "rising_wave_days": wave.trading_days,
+            "close_over_ma60_pct": round(long_term.close_over_ma60_pct, 2),
+            "ma60_over_ma120_pct": round(long_term.ma60_over_ma120_pct, 2),
+            "ma120_change_pct": round(long_term.ma120_change_pct, 2),
             "db_recent_date": value("trade_date"),
             "rise_pct": PatternSimilaritySearchService._round(value("rise_pct")),
             "close": value("close"), "open": value("open"),
