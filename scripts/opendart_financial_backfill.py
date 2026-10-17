@@ -44,6 +44,9 @@ def parser() -> argparse.ArgumentParser:
     cloud.add_argument("--max-batches", type=int, default=0, help="0은 해당 분기 전체")
     local = commands.add_parser("sync-local", help="완료 연도를 로컬 PostgreSQL에 반영")
     local.add_argument("--year", type=int, required=True)
+    commands.add_parser(
+        "sync-ready-local", help="Drive에서 완료된 다음 연도만 로컬 PostgreSQL에 반영"
+    )
     commands.add_parser("status", help="Drive 체크포인트 상태 확인")
     return result
 
@@ -85,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = (
                     service.sync_local(args.year, years=args.years)
                     if args.command == "sync-local"
+                    else service.sync_ready_local(years=args.years)
+                    if args.command == "sync-ready-local"
                     else service.status(args.years)
                 )
         print(json.dumps(result, ensure_ascii=False, indent=2))

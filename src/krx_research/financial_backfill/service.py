@@ -150,6 +150,26 @@ class FinancialBackfillService:
         self._write_metadata(metadata)
         return {"status": "complete", "year": year, "applied_batches": applied}
 
+    def sync_ready_local(
+        self, *, years: tuple[int, ...] = (2025, 2024, 2023)
+    ) -> dict[str, Any]:
+        """Apply the first cloud-complete year, otherwise leave local data untouched."""
+        metadata = self._read_metadata(list(years))
+        if metadata is None:
+            return {"status": "awaiting-cloud", "years": list(years)}
+        for year in years:
+            state = (metadata.get("years") or {}).get(str(year), {})
+            if state.get("local_completed"):
+                continue
+            periods = state.get("periods") or {}
+            if all(
+                periods.get(period.label, {}).get("cloud_completed")
+                for period in FinancialPeriod
+            ):
+                return self.sync_local(year, years=years)
+            return {"status": "awaiting-cloud", "year": year}
+        return {"status": "up-to-date", "years": list(years)}
+
     def status(self, years: tuple[int, ...] = (2025, 2024, 2023)) -> dict[str, Any]:
         return self._metadata(list(years))
 
@@ -267,12 +287,18 @@ class FinancialBackfillService:
         return self._context.drive.ensure_folder(period.label, year_folder)
 
     def _metadata(self, years: list[int]) -> dict[str, Any]:
+        document = self._read_metadata(years)
+        if document is None:
+            document = {"format_version": 1, "year_order": years, "years": {}}
+            self._write_metadata(document)
+        return document
+
+    def _read_metadata(self, years: list[int]) -> dict[str, Any] | None:
         document = self._context.drive.read_json(
             METADATA_NAME, self._context.drive.root_folder_id
         )
         if document is None:
-            document = {"format_version": 1, "year_order": years, "years": {}}
-            self._write_metadata(document)
+            return None
         if document.get("format_version") != 1:
             raise RuntimeError("지원하지 않는 재무 백필 메타데이터 버전입니다.")
         if list(document.get("year_order") or []) != years:

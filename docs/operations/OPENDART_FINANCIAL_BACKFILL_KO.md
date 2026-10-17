@@ -38,5 +38,18 @@ $env:PYTHONPATH='src'
   --years 2025,2024,2023 status
 ```
 
+완료된 다음 연도가 있는지 확인하고 있을 때만 반영하려면 다음 명령을 사용한다.
+
+```powershell
+$env:PYTHONPATH='src'
+.venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
+  --years 2025,2024,2023 sync-ready-local
+```
+
+`tools\setup\INSTALL_OPENDART_FINANCIAL_SYNC_ON_LOGON.cmd`를 한 번 실행하면 현재 사용자의
+Windows 로그인 때 위 검사를 숨김 실행한다. 실행 기록은
+`logs\financial_backfill\startup_sync.log`에 남는다. 클라우드의 4개 보고 기간이 모두
+완료되지 않은 연도는 내려받거나 DB에 쓰지 않는다.
+
 로컬 명령은 기존 `config/google_drive_oauth.dpapi`의 암호화된 Drive 자격증명을
 재사용하며 OpenDART 키를 요구하지 않는다.
