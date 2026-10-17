@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, slots=True)
 class ChartPatternSample:
-    image: Path
+    image: Path | None
     ticker: str
     company_name: str
     start: date
@@ -22,6 +22,6 @@ class StoredChartPattern:
     ticker: str
     company_name: str
     db_reference_date: date
-    canonical_path: Path
+    canonical_path: str
     duplicate: bool
     features: dict

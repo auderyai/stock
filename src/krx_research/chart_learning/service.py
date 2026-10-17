@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from hashlib import sha256
 from math import sqrt
 from pathlib import Path
 
@@ -142,13 +143,12 @@ class ChartLearningService:
         self.features = ChartPatternFeatureService(policy)
 
     def store(self, sample: ChartPatternSample) -> StoredChartPattern:
-        source = Path(sample.image).resolve()
+        source = Path(sample.image).resolve() if sample.image else None
         ticker = normalize_ticker(sample.ticker) if sample.ticker.strip() else ""
-        if source.suffix.lower() not in self._SUPPORTED or not source.is_file():
+        if source and (source.suffix.lower() not in self._SUPPORTED or not source.is_file()):
             raise ValueError("학습 원본은 존재하는 PNG·JPG·WEBP 이미지여야 합니다.")
         if sample.start > sample.end:
             raise ValueError("차트 시작일은 마지막 봉 날짜보다 늦을 수 없습니다.")
-        digest = self.layout.file_sha256(source)
         with ChartLearningRepository(self.database_target) as repository:
             repository.initialize()
             identity = repository.resolve(ticker, sample.company_name)
@@ -161,17 +161,28 @@ class ChartLearningService:
                                           self.policy.market_context.history_limit),
                 history, sample.start, sample.end,
             )
-            target = self._archive_path(source, ticker, identity["company_name"], sample, digest)
-            self._copy_once(source, target, digest)
+            features["source_kind"] = "image_and_database" if source else "database"
+            digest = (self.layout.file_sha256(source) if source else
+                      self._database_digest(ticker, sample.start, sample.end))
+            target = (self._archive_path(source, ticker, identity["company_name"], sample, digest)
+                      if source else
+                      f"postgresql:market.ohlcv_daily/{ticker}/{sample.start}/{sample.end}")
+            if source:
+                self._copy_once(source, target, digest)
             sample_id, duplicate = repository.save(
                 digest=digest, ticker=ticker, company_name=identity["company_name"],
                 start=sample.start, end=sample.end, db_reference_date=db_date,
-                canonical_path=self.layout.relative_path(target), assessment=sample.assessment,
+                canonical_path=(self.layout.relative_path(target) if source else target),
+                assessment=sample.assessment,
                 rationale=sample.rationale, policy=self.policy.as_dict(), features=features,
             )
         return StoredChartPattern(
-            sample_id, ticker, identity["company_name"], db_date, target, duplicate, features
+            sample_id, ticker, identity["company_name"], db_date, str(target), duplicate, features
         )
+
+    @staticmethod
+    def _database_digest(ticker: str, start, end) -> str:
+        return sha256(f"database:{ticker}:{start}:{end}".encode()).hexdigest()
 
     def _archive_path(self, source: Path, ticker: str, name: str,
                       sample: ChartPatternSample, digest: str) -> Path:

@@ -3,8 +3,8 @@ import unittest
 
 import pandas as pd
 
-from krx_research.chart_learning.service import ChartPatternFeatureService
 from krx_research.chart_learning.repository import ChartLearningRepository
+from krx_research.chart_learning.service import ChartLearningService, ChartPatternFeatureService
 
 
 class _Rows:
@@ -24,6 +24,13 @@ class _Connection:
 
 
 class ChartPatternFeatureServiceTests(unittest.TestCase):
+    def test_database_sample_identity_is_stable_without_an_image(self):
+        values = "232140", date(2025, 4, 3), date(2026, 10, 16)
+        first = ChartLearningService._database_digest(*values)
+        second = ChartLearningService._database_digest(*values)
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 64)
+
     def test_resolves_omitted_ticker_by_exact_unique_company_name(self):
         repository = ChartLearningRepository.__new__(ChartLearningRepository)
         repository.conn = _Connection([{"ticker": "092870", "company_name": "엑시콘"}])
