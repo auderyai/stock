@@ -21,7 +21,11 @@ class BollingerPolicy:
 @dataclass(frozen=True, slots=True)
 class MarketContextPolicy:
     indices: tuple[tuple[str, str], ...] = (("KOSPI", "1001"), ("KOSDAQ", "2001"))
-    volatility_days: int = 3
+    return_horizons: tuple[int, ...] = (3, 20, 60, 252)
+    volatility_windows: tuple[int, ...] = (20, 60)
+    regime_lookback_days: int = 252
+    annualization_days: int = 252
+    history_limit: int = 1000
     source: str = "Stock PostgreSQL"
 
 
@@ -37,7 +41,7 @@ class ChartAnalysisPolicy:
     bollinger: BollingerPolicy = BollingerPolicy()
     volume_source: str = "Stock PostgreSQL"
     market_context: MarketContextPolicy = MarketContextPolicy()
-    version: int = 1
+    version: int = 2
 
     def __post_init__(self) -> None:
         if self.moving_average_kind != "EMA" or len(self.moving_average_periods) != 8:

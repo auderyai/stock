@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from math import sqrt
 from pathlib import Path
 
 import pandas as pd
@@ -51,21 +52,79 @@ class ChartPatternFeatureService:
         }
         return features, segment.iloc[-1]["trade_date"].date()
 
-    def market_features(self, frame: pd.DataFrame) -> dict:
+    def market_features(self, frame: pd.DataFrame, stock: pd.DataFrame, start, end) -> dict:
         names = {code: name for name, code in self.policy.market_context.indices}
-        days = self.policy.market_context.volatility_days
+        policy = self.policy.market_context
+        stock_returns = self._returns(stock, start, end, "close")
         result = {}
         for code, group in frame.groupby("index_code"):
-            close = pd.to_numeric(group.sort_values("trade_date")["close_price"], errors="raise")
-            recent = close.pct_change(fill_method=None).dropna().tail(days)
-            if len(recent) < days:
-                raise ValueError(f"{names.get(str(code), code)} 최근 {days}거래일 지수 자료가 부족합니다.")
+            ordered = group.sort_values("trade_date").set_index("trade_date")
+            close = pd.to_numeric(ordered["close_price"], errors="raise")
+            returns = close.pct_change(fill_method=None).dropna()
+            required = max(*policy.return_horizons, policy.regime_lookback_days)
+            if len(returns) < required:
+                raise ValueError(f"{names.get(str(code), code)} 시장 국면 자료가 {required}거래일보다 적습니다.")
+            segment = close[close.index.date >= start]
+            segment = segment[segment.index.date <= end]
+            if len(segment) < 2:
+                raise ValueError(f"{names.get(str(code), code)} 학습기간 지수 자료가 부족합니다.")
+            market_returns = returns[(returns.index.date >= start) & (returns.index.date <= end)]
+            relationship = self._relationship(stock_returns, market_returns)
+            sample_return = (segment.iloc[-1] / segment.iloc[0] - 1.0) * 100
             result[names.get(str(code), str(code))] = {
-                "return_pct": round(float((close.iloc[-1] / close.iloc[-days - 1] - 1) * 100), 4),
-                "daily_volatility_pct": round(float(recent.std(ddof=0) * 100), 4),
-                "observations": days,
+                "sample_return_pct": round(float(sample_return), 4),
+                "recent_return_pct": {
+                    str(days): round(float((close.iloc[-1] / close.iloc[-days - 1] - 1) * 100), 4)
+                    for days in policy.return_horizons
+                },
+                "annualized_volatility_pct": {
+                    str(days): round(float(returns.tail(days).std(ddof=0)
+                                           * sqrt(policy.annualization_days) * 100), 4)
+                    for days in policy.volatility_windows
+                },
+                "volatility_20d_percentile_252d": self._volatility_percentile(returns),
+                "sample_max_drawdown_pct": round(float(
+                    (segment / segment.cummax() - 1.0).min() * 100
+                ), 4),
+                "latest_vs_ema_pct": {
+                    str(days): round(float((close.iloc[-1] / close.ewm(
+                        span=days, adjust=False).mean().iloc[-1] - 1) * 100), 4)
+                    for days in policy.volatility_windows
+                },
+                **relationship,
             }
         return result
+
+    def _volatility_percentile(self, returns: pd.Series) -> float:
+        policy = self.policy.market_context
+        rolling = returns.rolling(policy.volatility_windows[0]).std(ddof=0).dropna()
+        history = rolling.tail(policy.regime_lookback_days)
+        return round(float(history.le(history.iloc[-1]).mean() * 100), 4)
+
+    @staticmethod
+    def _returns(frame: pd.DataFrame, start, end, column: str) -> pd.Series:
+        ordered = frame.sort_values("trade_date").set_index("trade_date")
+        returns = pd.to_numeric(ordered[column], errors="raise").pct_change(fill_method=None)
+        return returns[(returns.index.date >= start) & (returns.index.date <= end)].dropna()
+
+    @staticmethod
+    def _relationship(stock: pd.Series, market: pd.Series) -> dict:
+        aligned = pd.concat([stock.rename("stock"), market.rename("market")], axis=1).dropna()
+        if len(aligned) < 20:
+            raise ValueError("종목과 시장의 통계 관계를 계산할 공통 거래일이 부족합니다.")
+        variance = aligned["market"].var(ddof=0)
+        beta = 0.0 if variance == 0 else aligned.cov(ddof=0).loc["stock", "market"] / variance
+        stock_return = (aligned["stock"] + 1.0).prod() - 1.0
+        market_return = (aligned["market"] + 1.0).prod() - 1.0
+        return {
+            "stock_beta": round(float(beta), 4),
+            "stock_market_correlation": round(float(aligned.corr().loc["stock", "market"]), 4),
+            "stock_excess_return_pct": round(float((stock_return - market_return) * 100), 4),
+            "beta_adjusted_residual_return_pct": round(float(
+                (aligned["stock"] - beta * aligned["market"]).sum() * 100
+            ), 4),
+            "aligned_observations": int(len(aligned)),
+        }
 
     @staticmethod
     def _number(value):
@@ -94,11 +153,13 @@ class ChartLearningService:
             repository.initialize()
             identity = repository.resolve(ticker, sample.company_name)
             ticker = identity["ticker"]
-            features, db_date = self.features.extract(repository.history(ticker, sample.end),
-                                                       sample.start, sample.end)
+            history = repository.history(ticker, sample.end)
+            features, db_date = self.features.extract(history, sample.start, sample.end)
             index_codes = tuple(code for _name, code in self.policy.market_context.indices)
             features["market_context"] = self.features.market_features(
-                repository.market_context(index_codes, sample.end)
+                repository.market_context(index_codes, sample.end,
+                                          self.policy.market_context.history_limit),
+                history, sample.start, sample.end,
             )
             target = self._archive_path(source, ticker, identity["company_name"], sample, digest)
             self._copy_once(source, target, digest)

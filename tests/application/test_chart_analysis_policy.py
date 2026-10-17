@@ -16,7 +16,9 @@ class ChartAnalysisPolicyTests(unittest.TestCase):
         self.assertEqual(policy.moving_average_periods, (5, 10, 15, 33, 56, 112, 224, 448))
         self.assertEqual((policy.bollinger.period, policy.bollinger.deviations,
                           policy.bollinger.center), (20, 2.0, "EMA"))
-        self.assertEqual(policy.market_context.volatility_days, 3)
+        self.assertEqual(policy.market_context.return_horizons, (3, 20, 60, 252))
+        self.assertEqual(policy.market_context.volatility_windows, (20, 60))
+        self.assertEqual(policy.market_context.regime_lookback_days, 252)
         self.assertEqual(policy.volume_source, "Stock PostgreSQL")
 
     def test_policy_is_immutable(self):

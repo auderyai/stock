@@ -60,7 +60,10 @@ def main() -> int:
         f"Slow Stochastic EMA{chart.stochastic_slow.periods}; "
         f"{chart.moving_average_kind}{chart.moving_average_periods}; "
         f"Bollinger {chart.bollinger.center}{chart.bollinger.period},{chart.bollinger.deviations:g}; "
-        f"volume={chart.volume_source}; market=KOSPI+KOSDAQ/{chart.market_context.volatility_days}일"
+        f"volume={chart.volume_source}; market=KOSPI+KOSDAQ/"
+        f"returns={chart.market_context.return_horizons}/"
+        f"volatility={chart.market_context.volatility_windows}/"
+        f"regime={chart.market_context.regime_lookback_days}일"
     )
     if phase == "before":
         return subprocess.run(

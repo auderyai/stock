@@ -7,7 +7,8 @@ expected = {
     "moving_average": ("EMA", (5, 10, 15, 33, 56, 112, 224, 448)),
     "bollinger": ("close", 20, 2.0, "EMA"),
     "volume": "Stock PostgreSQL",
-    "market": (("KOSPI", "1001"), ("KOSDAQ", "2001"), 3, "Stock PostgreSQL"),
+    "market": (("KOSPI", "1001"), ("KOSDAQ", "2001"), (3, 20, 60, 252),
+               (20, 60), 252, 252, 1000, "Stock PostgreSQL"),
 }
 actual = {
     "rsi": (policy.rsi.source, policy.rsi.periods, policy.rsi.smoothing),
@@ -19,8 +20,11 @@ actual = {
     "bollinger": (policy.bollinger.source, policy.bollinger.period,
                   policy.bollinger.deviations, policy.bollinger.center),
     "volume": policy.volume_source,
-    "market": (*policy.market_context.indices, policy.market_context.volatility_days,
-               policy.market_context.source),
+    "market": (*policy.market_context.indices, policy.market_context.return_horizons,
+               policy.market_context.volatility_windows,
+               policy.market_context.regime_lookback_days,
+               policy.market_context.annualization_days,
+               policy.market_context.history_limit, policy.market_context.source),
 }
 if actual != expected:
     raise SystemExit(f"CHART_ANALYSIS_POLICY: FAIL\nexpected={expected}\nactual={actual}")

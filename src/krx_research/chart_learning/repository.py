@@ -64,7 +64,7 @@ class ChartLearningRepository(AbstractContextManager["ChartLearningRepository"])
         return frame
 
     def market_context(self, codes: tuple[str, ...], end: date,
-                       limit_per_index: int = 10) -> pd.DataFrame:
+                       limit_per_index: int = 1000) -> pd.DataFrame:
         rows = self.conn.execute(
             "WITH ranked AS (SELECT index_code,trade_date::date trade_date,"
             "close_price::double precision close_price,"
@@ -89,6 +89,15 @@ class ChartLearningRepository(AbstractContextManager["ChartLearningRepository"])
             [digest, ticker, start, end],
         ).fetchone()
         if existing:
+            with self.conn.transaction():
+                self.conn.execute(
+                    "UPDATE chart_learning.pattern_samples SET db_reference_date=%s,"
+                    "assessment=%s,rationale=%s,policy_version=%s,policy=%s::jsonb,features=%s::jsonb "
+                    "WHERE sample_id=%s",
+                    [db_reference_date, assessment, rationale, int(policy["version"]),
+                     json.dumps(policy, ensure_ascii=False),
+                     json.dumps(features, ensure_ascii=False, default=str), existing["sample_id"]],
+                )
             return str(existing["sample_id"]), True
         sample_id = str(uuid.uuid4())
         with self.conn.transaction():
