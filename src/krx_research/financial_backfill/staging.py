@@ -52,17 +52,18 @@ class DuckDbFinancialStagingRepository:
                     for fact in normalized
                 ],
             )
-            invalid, duplicates = connection.execute(
-                "SELECT count(*) FILTER (WHERE receipt_no='' OR corp_code=''), "
-                "count(*)-count(DISTINCT fact_key) FROM facts"
+            invalid, conflicts = connection.execute(
+                "SELECT (SELECT count(*) FROM facts WHERE receipt_no='' OR corp_code=''), "
+                "(SELECT count(*) FROM (SELECT fact_key FROM facts GROUP BY fact_key "
+                "HAVING count(DISTINCT amount) > 1) conflicting)"
             ).fetchone()
-            if invalid or duplicates:
+            if invalid or conflicts:
                 raise FinancialStagingError(
-                    f"DuckDB 검증 실패: 필수값 누락={invalid}, 중복={duplicates}"
+                    f"DuckDB 검증 실패: 필수값 누락={invalid}, 충돌={conflicts}"
                 )
         finally:
             connection.close()
-        return normalized
+        return tuple({fact["fact_key"]: fact for fact in normalized}.values())
 
     @classmethod
     def _facts(
@@ -88,6 +89,7 @@ class DuckDbFinancialStagingRepository:
                 str(year), period.label, str(row.get("fs_div") or row.get("_scope") or ""),
                 str(row.get("sj_div") or ""), str(row.get("account_id") or ""),
                 str(row.get("account_nm") or ""), str(row.get("account_detail") or ""),
+                str(cls._integer(row.get("ord")) or ""),
                 value_kind,
             ))
             result.append({
