@@ -11,7 +11,7 @@ from krx_research.database import resolve_database_target
 def main() -> int:
     parser = argparse.ArgumentParser(description="Store one immutable local chart-learning sample.")
     parser.add_argument("--image", required=True)
-    parser.add_argument("--ticker", required=True)
+    parser.add_argument("--ticker", default="", help="생략하면 Stock DB에서 정확한 종목명으로 식별")
     parser.add_argument("--name", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)

@@ -83,7 +83,8 @@ class ChartLearningService:
         self.features = ChartPatternFeatureService(policy)
 
     def store(self, sample: ChartPatternSample) -> StoredChartPattern:
-        source, ticker = Path(sample.image).resolve(), normalize_ticker(sample.ticker)
+        source = Path(sample.image).resolve()
+        ticker = normalize_ticker(sample.ticker) if sample.ticker.strip() else ""
         if source.suffix.lower() not in self._SUPPORTED or not source.is_file():
             raise ValueError("학습 원본은 존재하는 PNG·JPG·WEBP 이미지여야 합니다.")
         if sample.start > sample.end:
@@ -92,6 +93,7 @@ class ChartLearningService:
         with ChartLearningRepository(self.database_target) as repository:
             repository.initialize()
             identity = repository.resolve(ticker, sample.company_name)
+            ticker = identity["ticker"]
             features, db_date = self.features.extract(repository.history(ticker, sample.end),
                                                        sample.start, sample.end)
             index_codes = tuple(code for _name, code in self.policy.market_context.indices)

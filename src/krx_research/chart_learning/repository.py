@@ -31,13 +31,17 @@ class ChartLearningRepository(AbstractContextManager["ChartLearningRepository"])
             )
 
     def resolve(self, ticker: str, company_name: str) -> dict:
-        row = self.conn.execute(
+        name = company_name.strip()
+        key, value = ("btrim(ticker)", ticker) if ticker else ("name", name)
+        rows = self.conn.execute(
             "SELECT btrim(ticker) ticker,COALESCE(name,'') company_name "
-            "FROM market.security_master WHERE btrim(ticker)=%s LIMIT 1", [ticker],
-        ).fetchone()
-        if not row:
-            raise ValueError(f"Stock DB에서 종목을 찾을 수 없습니다: {ticker}")
-        result = dict(row)
+            f"FROM market.security_master WHERE {key}=%s ORDER BY ticker LIMIT 2", [value],
+        ).fetchall()
+        if not rows:
+            raise ValueError(f"Stock DB에서 종목을 찾을 수 없습니다: {ticker or name}")
+        if len(rows) > 1:
+            raise ValueError(f"동일한 종목명이 여러 개입니다. 종목코드를 입력하십시오: {name}")
+        result = dict(rows[0])
         if company_name.strip() and company_name.strip() != result["company_name"]:
             raise ValueError(
                 f"종목명과 DB가 일치하지 않습니다: 입력={company_name}, DB={result['company_name']}"
