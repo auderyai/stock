@@ -13,6 +13,7 @@ from krx_research.qt.controllers.pattern_search_controller import PatternSearchC
 from krx_research.qt.presentation.column_catalog import label_for
 from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
 from krx_research.qt.services.box_breakout import PeriodPatternQuery
+from krx_research.qt.services.current_pattern import CurrentPatternKind, CurrentPatternQuery
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
 )
@@ -56,7 +57,10 @@ class PatternSearchDialog(QDialog):
         self._build(); self._mode_changed(0)
 
     def _build(self) -> None:
-        self.mode = QComboBox(); self.mode.addItems(("이동평균 유사 패턴", "지정 기간 박스권 패턴"))
+        self.mode = QComboBox(); self.mode.addItems((
+            "이동평균 유사 패턴", "지정 기간 박스권 패턴",
+            CurrentPatternKind.DOUBLE_BOTTOM.value, CurrentPatternKind.CUP_WITH_HANDLE.value,
+        ))
         self.security = QLineEdit(); self.security.setPlaceholderText("종목코드 또는 종목명 일부 입력")
         self.security_completer = SecurityCompleter(self.security, self)
         self.security_completer.searchRequested.connect(self._suggest_security)
@@ -74,7 +78,7 @@ class PatternSearchDialog(QDialog):
         for label, widget in (("검색 종류", self.mode), ("기준 종목", self.security),
                               ("시작일", self.start), ("종료일", self.end),
                               ("이동평균 종류", self.average), ("이동평균 기간", self.periods),
-                              ("", self.volume), ("유사 결과 수", self.top)):
+                              ("", self.volume), ("결과 수", self.top)):
             form.addRow(label, widget)
         self.help = QLabel(); self.help.setWordWrap(True)
         self.table = ResultTable()
@@ -93,6 +97,7 @@ class PatternSearchDialog(QDialog):
     def _mode_changed(self, index: int) -> None:
         similar = index == 0
         for widget in (self.average, self.periods, self.volume): widget.setEnabled(similar)
+        for widget in (self.security, self.start, self.end): widget.setEnabled(index < 2)
         self.help.setText(
             "선택한 종목의 주가와 이동평균선 모양을 같은 기간의 전체 종목과 비교합니다. "
             "지정 기간은 상승 여부와 무관한 기준 모양입니다. 전체 종목의 DB 최신일부터 같은 거래일 수를 비교하고, "
@@ -101,12 +106,18 @@ class PatternSearchDialog(QDialog):
             "최소 5거래일·10% 상승·3일 이상 상승으로 구성된 상승 파동이 한 번 이상 있어야 합니다. "
             "현재 종가>60일선>120일선, 120일선 상승, 60일선 대비 과열 30% 이하를 요구합니다. "
             "SMA·EMA·WMA를 최대 8개 지정하고 이동평균선 모양과 이격도를 함께 비교합니다."
-            if similar else
+            if similar else (
             "프로그램이 돌파 여부나 돌파일을 판단하지 않습니다. 사용자가 지정한 기준 종목의 전체 기간 "
             "주가·고가·저가·거래량 경로를 기준 모양으로 사용하고, DB 최신일 현재 상승 중인 유사 종목만 찾습니다."
             " 비정상 가격 단절·장기 바닥·과도한 무변동 종목은 결과에서 제외합니다."
             " 단발 급등이 아닌 여러 날의 상승 파동이 최소 한 번 있어야 합니다."
             " 현재 60일·120일 장기 상승 정렬이 아닌 종목도 제외합니다."
+            if index == 1 else
+            "DB 최신일을 기준으로 전체 종목을 검사합니다. 고정된 한 기간이 아니라 여러 길이의 구조를 비교하여 "
+            "형성 중·돌파 대기·최근 돌파 후 구조 유지 단계만 표시합니다. 오래전에 끝났거나 돌파 후 과도하게 "
+            "상승한 패턴, 지지선이 훼손된 패턴, 가격 단절·거래 정지 성격의 종목은 제외합니다. "
+            "점수와 넥라인·손잡이 상단, 무효화 가격 및 판정 근거는 판단 보조 자료이며 매매 추천이 아닙니다."
+            )
         )
 
     def _suggest_security(self, query: str) -> None:
@@ -130,6 +141,10 @@ class PatternSearchDialog(QDialog):
         self.status.setText("로컬 DB에서 검색 중..."); thread.start()
 
     def _command(self) -> Callable[[], list[dict]]:
+        if self.mode.currentIndex() >= 2:
+            kind = (CurrentPatternKind.DOUBLE_BOTTOM if self.mode.currentIndex() == 2
+                    else CurrentPatternKind.CUP_WITH_HANDLE)
+            return self._controller.command(CurrentPatternQuery(kind, self.top.value()))
         start, end = self.start.date().toPython(), self.end.date().toPython()
         security = SecurityCompleter.value(self.security.text())
         if self.mode.currentIndex() == 1:
@@ -147,8 +162,9 @@ class PatternSearchDialog(QDialog):
     def _show_rows(self, rows: list[dict]) -> None:
         frame = self._presenter.present(rows)
         self.table.set_frame(frame, header_labels={column: label_for(column) for column in frame.columns})
-        if "similarity_pct" in frame:
-            self.table.sortByColumn(frame.columns.get_loc("similarity_pct"), Qt.DescendingOrder)
+        score = "pattern_score" if "pattern_score" in frame else "similarity_pct"
+        if score in frame:
+            self.table.sortByColumn(frame.columns.get_loc(score), Qt.DescendingOrder)
         self.chart_button.setEnabled(not frame.empty)
         self.status.setText(f"검색 완료: {len(frame)}종목")
 

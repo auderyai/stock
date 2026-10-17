@@ -34,6 +34,15 @@ class PatternResultPresenterTests(unittest.TestCase):
         model.sort(0, Qt.DescendingOrder)
         self.assertEqual(model.frame.value.tolist(), [10, 2, 1])
 
+    def test_current_patterns_are_ranked_by_structure_score(self):
+        rows = [
+            {"stock_code": "2", "stock_name": "둘", "pattern_score": 80},
+            {"stock_code": "1", "stock_name": "하나", "pattern_score": 90},
+        ]
+        frame = PatternResultPresenter().present(rows)
+        self.assertEqual(frame.stock_code.tolist(), ["000001", "000002"])
+        self.assertEqual(frame["rank"].tolist(), [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -50,7 +50,7 @@ class PostgreSQLPatternRepository:
 
     def history(self, start: date, end: date) -> pd.DataFrame:
         rows = self._rows(
-            "SELECT btrim(o.ticker) stock_code,COALESCE(m.name,btrim(o.ticker)) stock_name,"
+            "SELECT btrim(o.ticker) stock_code,COALESCE(m.name,btrim(o.ticker)) stock_name,m.market,"
             "o.trade_date::date trade_date,o.close::double precision close,"
             "o.high::double precision high,o.low::double precision low,o.volume::double precision volume "
             "FROM market.ohlcv_daily o LEFT JOIN market.security_master m "
@@ -76,7 +76,7 @@ class PostgreSQLPatternRepository:
             " COALESCE(o.amount,o.close*o.volume)::double precision trading_value,"
             " row_number() OVER(PARTITION BY btrim(o.ticker) ORDER BY o.trade_date DESC) rn"
             " FROM market.ohlcv_daily o WHERE btrim(o.ticker)=ANY(%s)"
-            ") SELECT cur.stock_code,m.name stock_name,cur.trade_date,cur.open,cur.high,cur.low,"
+            ") SELECT cur.stock_code,m.name stock_name,m.market,cur.trade_date,cur.open,cur.high,cur.low,"
             "cur.close,cur.trading_value,m.market_cap::double precision market_cap,"
             "CASE WHEN prev.close>0 THEN (cur.close/prev.close-1)*100 END rise_pct "
             "FROM ranked cur LEFT JOIN ranked prev ON prev.stock_code=cur.stock_code AND prev.rn=2 "
@@ -84,6 +84,22 @@ class PostgreSQLPatternRepository:
             (codes,),
         )
         return {str(row["stock_code"]): row for row in rows}
+
+    def market_context(self, end: date, limit: int = 320) -> pd.DataFrame:
+        rows = self._rows(
+            "WITH ranked AS (SELECT index_code,trade_date::date trade_date,"
+            "close_price::double precision close,"
+            "row_number() OVER(PARTITION BY index_code ORDER BY trade_date DESC) rn "
+            "FROM market_core.index_ohlcv_daily WHERE index_code=ANY(%s) AND trade_date<=%s) "
+            "SELECT index_code,trade_date,close FROM ranked WHERE rn<=%s "
+            "ORDER BY index_code,trade_date",
+            (["1001", "2001"], end.isoformat(), int(limit)),
+        )
+        frame = pd.DataFrame(rows)
+        if frame.empty or set(frame.get("index_code", ())) != {"1001", "2001"}:
+            raise ValueError("KOSPI·KOSDAQ 종합지수 DB 자료가 모두 필요합니다.")
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"])
+        return frame
 
     def latest_date(self) -> date:
         rows = self._rows("SELECT max(trade_date)::date latest_date FROM market.ohlcv_daily")

@@ -12,6 +12,11 @@ class PatternResultPresenter:
         "moving_average_gap_similarity_pct", "volume_similarity_pct",
     )
     EVIDENCE = (
+        "pattern_kind", "pattern_stage", "pattern_score", "pattern_pivot",
+        "breakout_date", "resistance", "distance_to_resistance_pct",
+        "invalidation", "risk_to_invalidation_pct", "pattern_evidence",
+        "market_context", "market_return_20d_pct", "relative_return_20d_pct",
+        "market_correlation_60d", "market_beta_60d",
         "moving_average", "pattern_start", "pattern_end", "pattern_days",
         "period_return_pct", "trend_slope_pct", "range_position_pct", "period_range_pct",
         "maximum_gap_pct", "history_range_position_pct",
@@ -27,12 +32,13 @@ class PatternResultPresenter:
         frame = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
         if frame.empty:
             return frame
-        if "similarity_pct" not in frame:
-            frame["similarity_pct"] = pd.NA
+        score = "pattern_score" if "pattern_score" in frame else "similarity_pct"
+        if score not in frame:
+            frame[score] = pd.NA
         reference = frame.get("pattern_role", pd.Series(index=frame.index, dtype=str)).eq("기준 패턴")
         frame = frame.assign(_reference=reference, _code=frame.stock_code.astype(str).str.zfill(6))
         frame = frame.sort_values(
-            ["_reference", "similarity_pct", "_code"],
+            ["_reference", score, "_code"],
             ascending=[False, False, True], kind="mergesort", na_position="last",
         ).reset_index(drop=True)
         rank, ranks = 0, []

@@ -117,6 +117,21 @@ COLUMN_LABELS: dict[str, str] = {
     "ma120_change_pct": "120일선 20일 변화(%)",
     "period_range_pct": "기간 고저폭(%)",
     "pattern_role": "구분",
+    "pattern_kind": "패턴",
+    "pattern_stage": "현재 단계",
+    "pattern_score": "구조 점수",
+    "pattern_pivot": "중심 저점",
+    "breakout_date": "최근 돌파일",
+    "resistance": "돌파 기준가",
+    "distance_to_resistance_pct": "기준가 대비(%)",
+    "invalidation": "구조 무효화 가격",
+    "risk_to_invalidation_pct": "무효화 가격 여유(%)",
+    "pattern_evidence": "판정 근거",
+    "market_context": "비교 시장",
+    "market_return_20d_pct": "시장 20일 수익률(%)",
+    "relative_return_20d_pct": "시장 대비 20일 초과수익(%)",
+    "market_correlation_60d": "시장 60일 상관계수",
+    "market_beta_60d": "시장 60일 베타",
 }
 
 SCREEN_BASE_COLUMNS = (

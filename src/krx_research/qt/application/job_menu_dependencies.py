@@ -8,6 +8,7 @@ from krx_research.qt.controllers.pattern_search_controller import PatternSearchC
 from krx_research.qt.pattern_search import PatternSearchDialog
 from krx_research.qt.repositories.pattern_repository import PostgreSQLPatternRepository
 from krx_research.qt.services.box_breakout import PeriodPatternSearchService
+from krx_research.qt.services.current_pattern import CurrentPatternSearchService
 from krx_research.qt.services.chart_service import ChartService
 from krx_research.qt.services.pattern_similarity import PatternSimilaritySearchService, PatternVectorCache
 from krx_research.qt.services.security_search_service import SecuritySearchService
@@ -26,6 +27,7 @@ class JobMenuDependencies:
                 repository, PatternVectorCache(root / ".local_cache" / "pattern_vectors")
             ),
             PeriodPatternSearchService(repository),
+            CurrentPatternSearchService(repository),
         )
         self._chart_service = ChartService(WorkstationData(target))
 

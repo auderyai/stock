@@ -59,6 +59,16 @@ class PatternSearchDialogTests(unittest.TestCase):
             self.assertIn("돌파 여부나 돌파일을 판단하지 않습니다", dialog.help.text())
             dialog.close()
 
+    def test_current_pattern_modes_need_no_reference_security_or_dates(self):
+        with TemporaryDirectory():
+            dialog, _controller, _chart_factory = self._dialog()
+            dialog.mode.setCurrentIndex(2)
+            self.assertFalse(dialog.security.isEnabled())
+            self.assertFalse(dialog.start.isEnabled())
+            self.assertFalse(dialog.end.isEnabled())
+            self.assertIn("형성 중·돌파 대기·최근 돌파", dialog.help.text())
+            dialog.close()
+
     def test_partial_stock_name_offers_selectable_code(self):
         controller = MagicMock()
         controller.suggest_securities.return_value = [
