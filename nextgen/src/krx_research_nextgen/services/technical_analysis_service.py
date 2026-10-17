@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import math
 import numpy as np
 import pandas as pd
-from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import MACD
-from ta.volatility import BollingerBands
 
 from krx_research_nextgen.models.chart_data import IndicatorConfig
 
@@ -14,8 +11,7 @@ class TechnicalAnalysisService:
     """GUI-free technical-analysis service.
 
     Rules:
-    - Standard integer windows use the `ta` library.
-    - Fractional RSI periods use a Wilder-style EWM implementation.
+    - RSI and its signal use the user-approved exponential moving averages.
     - All numeric outputs preserve float dtype.
     """
 
@@ -32,15 +28,10 @@ class TechnicalAnalysisService:
 
         close = pd.to_numeric(df["close"], errors="coerce").astype("float64")
 
-        if float(cfg.rsi_period).is_integer():
-            df["rsi"] = RSIIndicator(
-                close=close,
-                window=int(cfg.rsi_period),
-                fillna=False,
-            ).rsi()
-        else:
-            df["rsi"] = self._fractional_rsi(close, float(cfg.rsi_period))
-        df["rsi_signal"] = df["rsi"].rolling(9).mean()
+        df["rsi"] = self._exponential_rsi(close, float(cfg.rsi_period))
+        df["rsi_signal"] = df["rsi"].ewm(
+            span=int(cfg.rsi_signal), adjust=False, min_periods=int(cfg.rsi_signal)
+        ).mean()
 
         for window in cfg.ema_windows:
             df[f"ema_{window}"] = close.ewm(span=window, adjust=False).mean()
@@ -56,27 +47,24 @@ class TechnicalAnalysisService:
         df["macd_signal"] = macd.macd_signal()
         df["macd_hist"] = macd.macd_diff()
 
-        bb = BollingerBands(
-            close=close,
-            window=int(cfg.bollinger_window),
-            window_dev=float(cfg.bollinger_std),
-            fillna=False,
-        )
-        df["bb_mid"] = bb.bollinger_mavg()
-        df["bb_upper"] = bb.bollinger_hband()
-        df["bb_lower"] = bb.bollinger_lband()
+        window = int(cfg.bollinger_window)
+        df["bb_mid"] = close.ewm(span=window, adjust=False, min_periods=window).mean()
+        deviation = close.rolling(window, min_periods=window).std(ddof=0)
+        df["bb_upper"] = df["bb_mid"] + float(cfg.bollinger_std) * deviation
+        df["bb_lower"] = df["bb_mid"] - float(cfg.bollinger_std) * deviation
 
-        stochastic = StochasticOscillator(
-            high=pd.to_numeric(df["high"], errors="coerce").astype("float64"),
-            low=pd.to_numeric(df["low"], errors="coerce").astype("float64"),
-            close=close,
-            window=int(cfg.stochastic_window),
-            smooth_window=int(cfg.stochastic_smooth),
-            fillna=False,
-        )
-        df["stoch_slow_k"] = stochastic.stoch_signal()
-        df["stoch_slow_d"] = df["stoch_slow_k"].rolling(
-            int(cfg.stochastic_smooth)
+        high = pd.to_numeric(df["high"], errors="coerce").astype("float64")
+        low = pd.to_numeric(df["low"], errors="coerce").astype("float64")
+        lowest = low.rolling(int(cfg.stochastic_window), min_periods=int(cfg.stochastic_window)).min()
+        highest = high.rolling(int(cfg.stochastic_window), min_periods=int(cfg.stochastic_window)).max()
+        fast_k = (close - lowest) / (highest - lowest).replace(0.0, np.nan) * 100.0
+        df["stoch_slow_k"] = fast_k.ewm(
+            span=int(cfg.stochastic_smooth), adjust=False,
+            min_periods=int(cfg.stochastic_smooth),
+        ).mean()
+        df["stoch_slow_d"] = df["stoch_slow_k"].ewm(
+            span=int(cfg.stochastic_signal), adjust=False,
+            min_periods=int(cfg.stochastic_signal),
         ).mean()
 
         return df
@@ -89,9 +77,9 @@ class TechnicalAnalysisService:
             raise ValueError("OHLCV frame is empty")
 
     @staticmethod
-    def _fractional_rsi(close: pd.Series, period: float) -> pd.Series:
-        if not math.isfinite(period) or period <= 1:
-            raise ValueError("fractional RSI period must be > 1")
+    def _exponential_rsi(close: pd.Series, period: float) -> pd.Series:
+        if not np.isfinite(period) or period <= 1:
+            raise ValueError("RSI period must be > 1")
 
         close = pd.to_numeric(close, errors="coerce").astype("float64")
         delta = close.diff()
@@ -99,8 +87,8 @@ class TechnicalAnalysisService:
         gains = delta.clip(lower=0.0).astype("float64")
         losses = (-delta.clip(upper=0.0)).astype("float64")
 
-        alpha = 1.0 / float(period)
-        min_periods = max(2, int(math.floor(period)))
+        alpha = 2.0 / (float(period) + 1.0)
+        min_periods = max(2, int(period))
 
         avg_gain = gains.ewm(
             alpha=alpha,

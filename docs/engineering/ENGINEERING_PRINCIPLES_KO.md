@@ -49,6 +49,12 @@
 1. 저장된 DB의 기준일까지 계산하며 미래 자료를 생성하거나 예측을 확정 사실처럼 표시하지 않는다.
 2. 실제값, 기준값, 판정 이유와 한계를 함께 표시한다.
 3. 파생 캐시는 다시 생성할 수 있어야 하며 원본 DB로 취급하거나 Git에 저장하지 않는다.
+4. 모든 차트 분석·학습은 `ChartAnalysisPolicy`를 먼저 확인한다.
+5. RSI는 종가 EMA 14·9, MACD 오실레이터는 종가 EMA 12·26·9,
+   Slow Stochastic은 5·3·3 EMA를 사용한다.
+6. 이동평균은 EMA 5·10·15·33·56·112·224·448, 볼린저밴드는 종가 EMA 20·2를 사용한다.
+7. 거래량과 KOSPI·KOSDAQ 종합지수는 Stock PostgreSQL 자료만 사용한다.
+8. 최근 3거래일 시장 수익률·변동성을 학습 변수로 분리하여 종목 고유 변동과 시장 충격을 구분한다.
 
 ## 7. 변경과 검증
 
@@ -66,6 +72,7 @@
 | 결과표 | `TablePresentationPolicy`, `DataFrameModel`, `ResultTable`, 기능별 Presenter |
 | 차트 | `ChartNavigationStrategy` 구현체, `ChartController`, `ChartService` |
 | DB | Repository, 자격증명 Resolver, `DailyCloseWritePolicy` |
+| 차트 분석·학습 설정 | `ChartAnalysisPolicy`, `verify_chart_analysis_policy.py` |
 | 체크포인트 | `CloudSyncService`, 단계별 완료 검증 및 복구 객체 |
 | 삭제 | Drive cleanup 서비스의 계획·확인·메타데이터 정리 절차 |
 | 정적 검증 | `verify_architecture.py`, `verify_import_boundaries.py`, UI·Git 검증기 |

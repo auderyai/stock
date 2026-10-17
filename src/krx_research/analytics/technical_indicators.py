@@ -12,11 +12,12 @@ import pandas as pd
 from pandas import DataFrame, Series
 
 from krx_research.collectors import normalize_ticker
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 
-EMA_WINDOWS = (5, 10, 15, 33, 56, 112, 224, 448)
+EMA_WINDOWS = DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods
 TRADING_DAYS_52W = 252
-BOLLINGER_WEEKS = 20
-BOLLINGER_STDDEV = 2.0
+BOLLINGER_WEEKS = DEFAULT_CHART_ANALYSIS_POLICY.bollinger.period
+BOLLINGER_STDDEV = DEFAULT_CHART_ANALYSIS_POLICY.bollinger.deviations
 FORMULA_VERSION = 3
 
 
@@ -162,7 +163,9 @@ def _weekly_indicators(code: str, work: DataFrame, calculated_at: str) -> DataFr
     weekly["weekly_return_pct"] = weekly["close"].pct_change(fill_method=None) * 100.0
 
     rolling = weekly["close"].rolling(BOLLINGER_WEEKS, min_periods=BOLLINGER_WEEKS)
-    weekly["bb_mid_20"] = rolling.mean()
+    weekly["bb_mid_20"] = weekly["close"].ewm(
+        span=BOLLINGER_WEEKS, adjust=False, min_periods=BOLLINGER_WEEKS
+    ).mean()
     deviation = rolling.std(ddof=0)
     weekly["bb_upper_20_2"] = weekly["bb_mid_20"] + BOLLINGER_STDDEV * deviation
     weekly["bb_lower_20_2"] = weekly["bb_mid_20"] - BOLLINGER_STDDEV * deviation

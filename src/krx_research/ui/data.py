@@ -43,6 +43,7 @@ from krx_research.database import (
 )
 from krx_research.data_engine.postgresql import BaseDataRepository
 from krx_research.data_engine.investor import FOREIGN_MEMBERS, INSTITUTION_MEMBERS
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 
 from .on_demand import PostgreSQLOnDemandData
 
@@ -152,11 +153,10 @@ DAILY_GAINER_SCREEN_TYPES = frozenset(
 REALTIME_CACHE_SECONDS = 60.0
 REALTIME_ADJUSTMENT_RATIO_TOLERANCE = 0.02
 
-RSI_PERIOD = 14
-RSI_SIGNAL_PERIOD = 9
-STOCHASTIC_K_PERIOD = 5
-STOCHASTIC_K_SMOOTHING = 3
-STOCHASTIC_D_PERIOD = 3
+RSI_PERIOD, RSI_SIGNAL_PERIOD = DEFAULT_CHART_ANALYSIS_POLICY.rsi.periods
+STOCHASTIC_K_PERIOD, STOCHASTIC_K_SMOOTHING, STOCHASTIC_D_PERIOD = (
+    DEFAULT_CHART_ANALYSIS_POLICY.stochastic_slow.periods
+)
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -1742,17 +1742,21 @@ class WorkstationData:
         )
         daily["macd_oscillator"] = daily["macd"] - daily["macd_signal"]
 
-        bollinger = daily["close"].rolling(20, min_periods=20)
-        daily["bb_mid_20"] = bollinger.mean()
+        bollinger_period = DEFAULT_CHART_ANALYSIS_POLICY.bollinger.period
+        bollinger = daily["close"].rolling(bollinger_period, min_periods=bollinger_period)
+        daily["bb_mid_20"] = daily["close"].ewm(
+            span=bollinger_period, adjust=False, min_periods=bollinger_period
+        ).mean()
         bollinger_deviation = bollinger.std(ddof=0)
-        daily["bb_upper_20_2"] = daily["bb_mid_20"] + 2.0 * bollinger_deviation
-        daily["bb_lower_20_2"] = daily["bb_mid_20"] - 2.0 * bollinger_deviation
+        deviations = DEFAULT_CHART_ANALYSIS_POLICY.bollinger.deviations
+        daily["bb_upper_20_2"] = daily["bb_mid_20"] + deviations * bollinger_deviation
+        daily["bb_lower_20_2"] = daily["bb_mid_20"] - deviations * bollinger_deviation
 
         change = daily["close"].diff()
         average_gain = (
             change.clip(lower=0)
             .ewm(
-                alpha=1 / RSI_PERIOD,
+                span=RSI_PERIOD,
                 adjust=False,
                 min_periods=RSI_PERIOD,
             )
@@ -1761,7 +1765,7 @@ class WorkstationData:
         average_loss = (
             (-change.clip(upper=0))
             .ewm(
-                alpha=1 / RSI_PERIOD,
+                span=RSI_PERIOD,
                 adjust=False,
                 min_periods=RSI_PERIOD,
             )
@@ -1773,10 +1777,7 @@ class WorkstationData:
         daily.loc[average_loss.eq(0) & average_gain.eq(0), "rsi_14"] = 50.0
         daily["rsi_signal_9"] = (
             daily["rsi_14"]
-            .rolling(
-                RSI_SIGNAL_PERIOD,
-                min_periods=RSI_SIGNAL_PERIOD,
-            )
+            .ewm(span=RSI_SIGNAL_PERIOD, adjust=False, min_periods=RSI_SIGNAL_PERIOD)
             .mean()
         )
 
@@ -1798,16 +1799,13 @@ class WorkstationData:
         )
         price_range = (highest_high - lowest_low).replace(0, np.nan)
         fast_k = (daily["close"] - lowest_low) / price_range * 100.0
-        daily["stoch_slow_k"] = fast_k.rolling(
-            STOCHASTIC_K_SMOOTHING,
+        daily["stoch_slow_k"] = fast_k.ewm(
+            span=STOCHASTIC_K_SMOOTHING, adjust=False,
             min_periods=STOCHASTIC_K_SMOOTHING,
         ).mean()
         daily["stoch_slow_d"] = (
             daily["stoch_slow_k"]
-            .rolling(
-                STOCHASTIC_D_PERIOD,
-                min_periods=STOCHASTIC_D_PERIOD,
-            )
+            .ewm(span=STOCHASTIC_D_PERIOD, adjust=False, min_periods=STOCHASTIC_D_PERIOD)
             .mean()
         )
 

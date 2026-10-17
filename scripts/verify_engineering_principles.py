@@ -11,7 +11,9 @@ sys.path.insert(0, str(ROOT / "src"))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from krx_research.policies import DEFAULT_ENGINEERING_POLICY  # noqa: E402
+from krx_research.policies import (  # noqa: E402
+    DEFAULT_CHART_ANALYSIS_POLICY, DEFAULT_ENGINEERING_POLICY,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +27,7 @@ class EngineeringPrincipleVerifier:
 
     def __init__(self, python: str = sys.executable):
         self.checks = (
+            Check("chart analysis settings", (python, "scripts/verify_chart_analysis_policy.py")),
             Check("architecture", (python, "scripts/verify_architecture.py")),
             Check("import boundaries", (python, "scripts/verify_import_boundaries.py")),
             Check("chart policy", (python, "scripts/verify_v6_chart_navigation.py")),
@@ -50,6 +53,19 @@ def main() -> int:
     parser.add_argument("phase", choices=("before", "after", "list"))
     phase = parser.parse_args().phase
     print(DEFAULT_ENGINEERING_POLICY.text())
+    chart = DEFAULT_CHART_ANALYSIS_POLICY
+    print(
+        "[CHART-ANALYSIS] "
+        f"RSI EMA{chart.rsi.periods}; MACD EMA{chart.macd_oscillator.periods}; "
+        f"Slow Stochastic EMA{chart.stochastic_slow.periods}; "
+        f"{chart.moving_average_kind}{chart.moving_average_periods}; "
+        f"Bollinger {chart.bollinger.center}{chart.bollinger.period},{chart.bollinger.deviations:g}; "
+        f"volume={chart.volume_source}; market=KOSPI+KOSDAQ/{chart.market_context.volatility_days}일"
+    )
+    if phase == "before":
+        return subprocess.run(
+            (sys.executable, "scripts/verify_chart_analysis_policy.py"), cwd=ROOT, check=False
+        ).returncode
     return EngineeringPrincipleVerifier().run() if phase == "after" else 0
 
 

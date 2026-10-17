@@ -239,6 +239,8 @@ log/
 LOGS/
 assistant_workspace/runs/
 .local_cache/pattern_vectors/
+# Immutable user-supplied chart-learning evidence; metadata lives in PostgreSQL.
+01_기업분석/*/chart_learning/
 *.tmp
 *.bak
 *.zip
