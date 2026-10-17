@@ -12,7 +12,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Store one immutable local chart-learning sample.")
     parser.add_argument("--image", help="생략하면 Stock PostgreSQL 구간 자체를 학습 원본으로 사용")
     parser.add_argument("--ticker", default="", help="생략하면 Stock DB에서 정확한 종목명으로 식별")
-    parser.add_argument("--name", required=True)
+    parser.add_argument("--name", default="", help="생략하면 Stock DB에서 종목코드로 확인")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--assessment", default="USER_SELECTED_DB_PATTERN_REFERENCE")
@@ -27,7 +27,8 @@ def main() -> int:
         date.fromisoformat(args.start),
         date.fromisoformat(args.end), args.assessment, args.rationale,
     ))
-    print(f"stored={result.sample_id} ticker={result.ticker} db_date={result.db_reference_date} "
+    print(f"stored={result.sample_id} ticker={result.ticker} name={result.company_name} "
+          f"db_date={result.db_reference_date} "
           f"duplicate={str(result.duplicate).lower()}")
     return 0
 
