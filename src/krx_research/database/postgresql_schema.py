@@ -331,6 +331,7 @@ POSTGRESQL_FINANCIAL_SCHEMA = (
         account_id VARCHAR(255),
         account_name VARCHAR(500) NOT NULL,
         account_detail TEXT NOT NULL DEFAULT '',
+        value_kind VARCHAR(32) NOT NULL DEFAULT 'current',
         period_start DATE,
         period_end DATE NOT NULL,
         amount NUMERIC(38, 4),

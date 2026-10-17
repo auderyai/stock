@@ -42,5 +42,12 @@ WORKER_TABLES: tuple[TableSpec, ...] = (
     ),
 )
 
+FINANCIAL_TABLES: tuple[TableSpec, ...] = (
+    TableSpec("financial.company_master", ("corp_code",), full_in_delta=True),
+    TableSpec("financial.filings", ("receipt_no",), full_in_delta=True),
+    TableSpec("financial.statement_facts", ("fact_key",), full_in_delta=True),
+    TableSpec("financial.ingestion_runs", ("run_id",), full_in_delta=True),
+)
+
 
 ARCHIVE_FORMAT_VERSION = 1

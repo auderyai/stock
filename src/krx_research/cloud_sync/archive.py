@@ -113,13 +113,16 @@ class DatabaseArchiveService:
         *,
         target_date: date,
         git_commit: str = "unknown",
+        kind: str = "daily-delta",
+        batch_id: str | None = None,
     ) -> ArchiveResult:
         return self._export(
             output,
-            kind="daily-delta",
+            kind=kind,
             reference_date=target_date,
             pg_dump=None,
             git_commit=git_commit,
+            batch_id=batch_id,
         )
 
     def _export(
@@ -130,6 +133,7 @@ class DatabaseArchiveService:
         reference_date: date,
         pg_dump: Path | None,
         git_commit: str,
+        batch_id: str | None = None,
     ) -> ArchiveResult:
         output = output.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -155,11 +159,13 @@ class DatabaseArchiveService:
                     }
                 )
             created = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-            batch_id = f"{reference_date.isoformat()}-{created.replace(':', '').replace('+00:00', 'Z')}"
+            resolved_batch_id = batch_id or (
+                f"{reference_date.isoformat()}-{created.replace(':', '').replace('+00:00', 'Z')}"
+            )
             manifest: dict[str, Any] = {
                 "format_version": ARCHIVE_FORMAT_VERSION,
                 "kind": kind,
-                "batch_id": batch_id,
+                "batch_id": resolved_batch_id,
                 "reference_date": reference_date.isoformat(),
                 "created_at": created,
                 "git_commit": git_commit,
@@ -355,13 +361,22 @@ class DatabaseArchiveService:
 
 
 class DeltaArchiveApplier:
-    def __init__(self, conn, tables: tuple[TableSpec, ...] = WORKER_TABLES) -> None:
+    def __init__(
+        self,
+        conn,
+        tables: tuple[TableSpec, ...] = WORKER_TABLES,
+        *,
+        expected_kind: str = "daily-delta",
+    ) -> None:
         self._conn = conn
         self._tables = {spec.relation: spec for spec in tables}
+        self._expected_kind = expected_kind
 
     def apply(self, archive: Path) -> dict[str, Any]:
         with _extracted_archive(archive) as extracted:
-            manifest = _load_and_verify_manifest(extracted, expected_kind="daily-delta")
+            manifest = _load_and_verify_manifest(
+                extracted, expected_kind=self._expected_kind
+            )
             self._ensure_history_table()
             batch_id = str(manifest["batch_id"])
             with self._conn.transaction():
