@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
 from psycopg import sql
 
 from krx_research.data_engine.config import DataEngineSettings
+from krx_research.data_engine.market_indices import (
+    COMPOSITE_INDEX_SPECS,
+    LS_INDEX_PRICE_SCALE,
+    ls_sector_index_spec,
+)
 from krx_research.data_engine.postgresql import BaseDataRepository
 
 
@@ -208,6 +215,104 @@ class PostgreSQLXingMenuRepository:
                 values,
             )
         return len(values)
+
+    def publish_market_indices(self, as_of: dt.date) -> int:
+        """Validate and publish all LS KOSPI/KOSDAQ sectors into the canonical store."""
+        rows = self.conn.execute(
+            """SELECT d.sector_code,m.sector_name,d.trade_date,d.open_price,d.high_price,
+                      d.low_price,d.close_price,d.volume,d.amount
+                 FROM market_core.ls_sector_ohlcv_daily d
+                 JOIN market_core.ls_sector_master m USING(sector_code)
+                WHERE d.trade_date=%s AND (d.sector_code LIKE '0%%' OR d.sector_code LIKE '3%%')
+                ORDER BY d.sector_code""",
+            (as_of,),
+        ).fetchall()
+        specs = {
+            str(row["sector_code"]): ls_sector_index_spec(
+                str(row["sector_code"]), str(row["sector_name"])
+            )
+            for row in rows
+        }
+        missing = sorted({spec.sector_code for spec in COMPOSITE_INDEX_SPECS} - set(specs))
+        if missing:
+            raise ValueError(f"종합지수 원천 누락 ({as_of}): {', '.join(missing)}")
+
+        multiplier = int(os.getenv("LS_INDEX_VALUE_WON_MULTIPLIER", "1000000"))
+        if multiplier <= 0:
+            raise ValueError("LS_INDEX_VALUE_WON_MULTIPLIER는 양의 정수여야 합니다.")
+        records = []
+        for row in rows:
+            sector_code = str(row["sector_code"])
+            spec = specs[sector_code]
+            if spec is None:
+                continue
+            prices = tuple(Decimal(str(row[name])) / LS_INDEX_PRICE_SCALE for name in (
+                "open_price", "high_price", "low_price", "close_price"
+            ))
+            open_price, high_price, low_price, close_price = prices
+            invalid_ohlc = (
+                min(prices) <= 0
+                or high_price < max(open_price, close_price)
+                or low_price > min(open_price, close_price)
+            )
+            if invalid_ohlc:
+                raise ValueError(f"종합·업종지수 원천 OHLC 오류 ({as_of}, {sector_code})")
+            amount = row.get("amount")
+            records.append((
+                spec.index_code, as_of, *prices,
+                int(row["volume"]) if row.get("volume") is not None else None,
+                Decimal(str(amount)) * multiplier if amount is not None else None,
+                "LS_XING:t8429",
+            ))
+
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO market_core.index_master(index_code,market,index_name)
+                   VALUES (%s,%s,%s) ON CONFLICT(index_code) DO UPDATE SET
+                     market=EXCLUDED.market,index_name=EXCLUDED.index_name,updated_at=now()""",
+                [(spec.index_code, spec.market, spec.index_name)
+                 for spec in specs.values() if spec is not None],
+            )
+            cur.executemany(
+                """INSERT INTO market_core.index_ohlcv_daily
+                   (index_code,trade_date,open_price,high_price,low_price,close_price,
+                    volume,trading_value,source)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT(index_code,trade_date) DO UPDATE SET
+                     open_price=EXCLUDED.open_price,high_price=EXCLUDED.high_price,
+                     low_price=EXCLUDED.low_price,close_price=EXCLUDED.close_price,
+                     volume=EXCLUDED.volume,trading_value=EXCLUDED.trading_value,
+                     source=EXCLUDED.source,retrieved_at=now()""",
+                records,
+            )
+            verified = cur.execute(
+                """SELECT index_code,open_price,high_price,low_price,close_price
+                     FROM market_core.index_ohlcv_daily
+                    WHERE trade_date=%s AND index_code=ANY(%s)""",
+                (as_of, [record[0] for record in records]),
+            ).fetchall()
+            actual = {
+                str(row["index_code"]): tuple(Decimal(str(row[name])) for name in (
+                    "open_price", "high_price", "low_price", "close_price"
+                ))
+                for row in verified
+            }
+            expected = {record[0]: tuple(record[2:6]) for record in records}
+            if actual != expected:
+                raise RuntimeError(f"종합·업종지수 canonical 저장 검증 실패 ({as_of})")
+        return len(records)
+
+    def market_index_source_dates(self, start: dt.date, end: dt.date) -> list[dt.date]:
+        rows = self.conn.execute(
+            """SELECT trade_date FROM market_core.ls_sector_ohlcv_daily
+                WHERE trade_date BETWEEN %s AND %s
+                  AND (sector_code LIKE '0%%' OR sector_code LIKE '3%%')
+                GROUP BY trade_date
+                HAVING COUNT(*) FILTER (WHERE sector_code IN ('001','301'))=2
+                ORDER BY trade_date""",
+            (start, end),
+        ).fetchall()
+        return [row["trade_date"] for row in rows]
 
     def completed_sector_codes(self, as_of: dt.date) -> set[str]:
         rows = self.conn.execute(

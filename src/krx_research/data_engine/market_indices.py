@@ -2,8 +2,36 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from psycopg import sql
 import pandas as pd
+
+
+@dataclass(frozen=True)
+class MarketIndexSpec:
+    sector_code: str
+    index_code: str
+    market: str
+    index_name: str
+
+
+COMPOSITE_INDEX_SPECS = (
+    MarketIndexSpec("001", "1001", "KOSPI", "KOSPI 종합"),
+    MarketIndexSpec("301", "2001", "KOSDAQ", "KOSDAQ 종합"),
+)
+LS_INDEX_PRICE_SCALE = 100
+
+
+def ls_sector_index_spec(sector_code: str, sector_name: str) -> MarketIndexSpec | None:
+    composite = next((spec for spec in COMPOSITE_INDEX_SPECS
+                      if spec.sector_code == sector_code), None)
+    if composite:
+        return composite
+    market = (
+        "KOSPI" if sector_code.startswith("0")
+        else "KOSDAQ" if sector_code.startswith("3") else None
+    )
+    return MarketIndexSpec(sector_code, f"L{sector_code}", market, sector_name) if market else None
 
 DDL = """
 CREATE SCHEMA IF NOT EXISTS market_core;

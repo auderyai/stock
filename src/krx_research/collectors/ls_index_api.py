@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 import pandas as pd
+
+from krx_research.data_engine.market_indices import LS_INDEX_PRICE_SCALE
 from .xing.bridge import XingBridgeClient
 
 def _frame(rows,start,end):
@@ -10,7 +12,9 @@ def _frame(rows,start,end):
     for item in rows:
         stamp=str(item.get("date","")).strip()
         try:
-            day=dt.datetime.strptime(stamp,"%Y%m%d").date(); p=[float(item.get(x) or 0) for x in ("open","high","low","close")]
+            day=dt.datetime.strptime(stamp,"%Y%m%d").date()
+            p=[float(item.get(x) or 0) / LS_INDEX_PRICE_SCALE
+               for x in ("open","high","low","close")]
         except ValueError: continue
         if start<=day<=end and min(p)>0:
             records.append({"date":day,"시가":p[0],"고가":p[1],"저가":p[2],"종가":p[3],"거래량":int(float(item.get("jdiff_vol") or 0)),"LS거래대금원시":float(item.get("value") or 0)})
@@ -18,7 +22,7 @@ def _frame(rows,start,end):
 
 class LSIndexClient:
     def __init__(self,*_legacy,delay:float=.08,project_root:str|Path|None=None):
-        root=Path(project_root).resolve() if project_root else Path(__file__).resolve().parents[3]; self.bridge=XingBridgeClient(root,delay=delay)
+        root=Path(project_root).resolve() if project_root else Path(__file__).resolve().parents[3]; self.bridge=XingBridgeClient(root,delay=max(1.1,delay))
     def __enter__(self): self.bridge.connect(); return self
     def __exit__(self,*_): self.close()
     def close(self): self.bridge.close()

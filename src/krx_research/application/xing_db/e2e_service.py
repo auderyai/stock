@@ -132,13 +132,18 @@ class DbMenuE2EVerificationService:
         if problem:
             return VerificationResult("Menu 2 end-to-end", False, f"재실행: {problem}")
 
-        stable_fields = ("sector_master", "security_master", "kospi200", "kosdaq150", "sector_daily")
+        stable_fields = (
+            "sector_master", "security_master", "kospi200", "kosdaq150", "sector_daily",
+            "market_index_sources", "market_indices_published",
+        )
         unstable = [name for name in stable_fields if getattr(after, name) != getattr(after2, name)]
         if unstable:
             return VerificationResult("Menu 2 end-to-end", False, "동일 기준일 재실행 후 row count 변동: " + ", ".join(unstable))
         return VerificationResult(
             "Menu 2 end-to-end", True,
-            f"{as_of}: wrapper 2회 성공, KOSPI200={after2.kospi200}, KOSDAQ150={after2.kosdaq150}, 업종일봉={after2.sector_daily}, 중복=0",
+            f"{as_of}: wrapper 2회 성공, KOSPI200={after2.kospi200}, "
+            f"KOSDAQ150={after2.kosdaq150}, 업종일봉={after2.sector_daily}, "
+            f"종합·업종지수={after2.market_indices_published}, 중복=0",
         )
 
     @staticmethod
@@ -151,6 +156,11 @@ class DbMenuE2EVerificationService:
             return f"지수 구성종목 비정상: KOSPI200={snap.kospi200}, KOSDAQ150={snap.kosdaq150}"
         if snap.sector_daily <= 0:
             return "기준일 업종 일봉이 0건입니다."
+        if snap.market_index_sources <= 0 or snap.market_indices_published != snap.market_index_sources:
+            return (
+                "종합·업종지수 canonical 발행 누락: "
+                f"source={snap.market_index_sources}, published={snap.market_indices_published}"
+            )
         if snap.duplicates:
             return f"PK 중복 검출={snap.duplicates}"
         return ""
@@ -160,7 +170,8 @@ class DbMenuE2EVerificationService:
         return (
             f"sector={snap.sector_master}, security={snap.security_master}, "
             f"K200={snap.kospi200}, KQ150={snap.kosdaq150}, "
-            f"sector_daily={snap.sector_daily}, duplicates={snap.duplicates}"
+            f"sector_daily={snap.sector_daily}, indices="
+            f"{snap.market_indices_published}/{snap.market_index_sources}, duplicates={snap.duplicates}"
         )
 
     @staticmethod

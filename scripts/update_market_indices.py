@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from krx_research.data_engine.config import DataEngineSettings
 from krx_research.data_engine.postgresql import BaseDataRepository
-from krx_research.data_engine.market_indices import ensure_schema
+from krx_research.data_engine.market_indices import COMPOSITE_INDEX_SPECS, ensure_schema
 from krx_research.collectors.ls_index_api import LSIndexClient
 
 
@@ -92,6 +92,8 @@ def main(argv=None) -> int:
                         help='빠른 화면 확인용 최근 일수 (0=DB 최초일 전체 갱신)')
     parser.add_argument('--full-refresh', action='store_true',
                         help='기존 지수도 DB의 첫 거래일부터 다시 수집')
+    parser.add_argument('--composites-only', action='store_true',
+                        help='KOSPI·KOSDAQ 종합지수만 갱신')
     args = parser.parse_args(argv)
     if args.start > args.end or args.recent_days < 0:
         parser.error('시작일이 종료일보다 늦습니다.')
@@ -127,7 +129,8 @@ def main(argv=None) -> int:
         ensure_schema(conn)
         for market in ('KOSPI', 'KOSDAQ'):
             # The selected end date avoids asking the source for future indices.
-            composite = '1001' if market == 'KOSPI' else '2001'
+            composite = next(spec.index_code for spec in COMPOSITE_INDEX_SPECS
+                             if spec.market == market)
             if stock is None or ls_sectors:
                 codes = [composite]
             else:
@@ -140,7 +143,7 @@ def main(argv=None) -> int:
                 allowed = {composite, *SECTOR_CODES[market]}
                 codes = list(dict.fromkeys([composite, *SECTOR_CODES[market],
                                                 *(c for c in codes if c in allowed)]))
-            if ls_sectors:
+            if ls_sectors and not args.composites_only:
                 prefix = '0' if market == 'KOSPI' else '3'
                 codes.extend('L' + code for code in ls_sectors if code[0] == prefix and code not in ('001', '301'))
             codes = list(dict.fromkeys(codes))
@@ -266,7 +269,7 @@ def main(argv=None) -> int:
                         time.sleep(max(0,args.delay))
                     if consecutive_errors >= 3:
                         break
-                    if not first_date and not saved_for_code:
+                    if not saved_for_code:
                         failures.append(f'{market} {code}: 조회 기간에 저장할 일봉 없음')
                 except Exception as exc:
                     failures.append(f'{market} {code}: {exc}')

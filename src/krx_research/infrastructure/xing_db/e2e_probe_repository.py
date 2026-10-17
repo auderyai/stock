@@ -156,6 +156,25 @@ class PostgreSQLE2EProbeRepository:
         sector_daily = scalar(
             "SELECT COUNT(*)::int AS n FROM market_core.ls_sector_ohlcv_daily WHERE trade_date=%s", (as_of,)
         )
+        market_index_sources = scalar(
+            """SELECT COUNT(*)::int AS n FROM market_core.ls_sector_ohlcv_daily
+               WHERE trade_date=%s AND (sector_code LIKE '0%%' OR sector_code LIKE '3%%')""",
+            (as_of,),
+        )
+        market_indices_published = scalar(
+            """SELECT COUNT(*)::int AS n
+                 FROM market_core.ls_sector_ohlcv_daily s
+                 JOIN market_core.index_ohlcv_daily i
+                   ON i.trade_date=s.trade_date
+                  AND i.index_code=CASE s.sector_code
+                        WHEN '001' THEN '1001' WHEN '301' THEN '2001'
+                        ELSE 'L' || s.sector_code END
+                  AND i.open_price=s.open_price/100 AND i.high_price=s.high_price/100
+                  AND i.low_price=s.low_price/100 AND i.close_price=s.close_price/100
+                WHERE s.trade_date=%s
+                  AND (s.sector_code LIKE '0%%' OR s.sector_code LIKE '3%%')""",
+            (as_of,),
+        )
         dup_sector_master = scalar(
             """SELECT COALESCE(SUM(n-1),0)::int AS n FROM
                (SELECT COUNT(*) n FROM market_core.ls_sector_master GROUP BY sector_code HAVING COUNT(*)>1) x"""
@@ -181,6 +200,8 @@ class PostgreSQLE2EProbeRepository:
             kospi200=kospi200,
             kosdaq150=kosdaq150,
             sector_daily=sector_daily,
+            market_index_sources=market_index_sources,
+            market_indices_published=market_indices_published,
             duplicate_sector_master=dup_sector_master,
             duplicate_security_master=dup_security_master,
             duplicate_membership=dup_membership,

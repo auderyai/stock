@@ -32,6 +32,8 @@ class Menu2Snapshot:
     kospi200: int
     kosdaq150: int
     sector_daily: int
+    market_index_sources: int
+    market_indices_published: int
     duplicate_sector_master: int
     duplicate_security_master: int
     duplicate_membership: int

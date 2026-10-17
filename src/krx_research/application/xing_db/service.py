@@ -12,6 +12,25 @@ from .ports import RawTrPort, XingMenuRepositoryPort
 Progress = Callable[[str], None]
 
 
+class MarketIndexPublisher:
+    def __init__(self, repository: XingMenuRepositoryPort) -> None:
+        self._repo = repository
+
+    def publish(self, as_of: dt.date) -> int:
+        published = self._repo.publish_market_indices(as_of)
+        if published <= 0:
+            raise ValueError("KOSPI·KOSDAQ 종합·업종지수 canonical 발행 결과가 0건입니다.")
+        return published
+
+    def publish_range(self, start: dt.date, end: dt.date) -> int:
+        if start > end:
+            raise ValueError("start가 end보다 늦습니다.")
+        dates = self._repo.market_index_source_dates(start, end)
+        if not dates:
+            raise ValueError(f"종합·업종지수 발행 원천 거래일이 없습니다: {start}~{end}")
+        return sum(self.publish(day) for day in dates)
+
+
 class XingDbMenuService:
     """Application service for menu 2/5/7.
 
@@ -31,6 +50,7 @@ class XingDbMenuService:
     def __init__(self, bridge: RawTrPort, repository: XingMenuRepositoryPort) -> None:
         self._bridge = bridge
         self._repo = repository
+        self._index_publisher = MarketIndexPublisher(repository)
 
     def close(self) -> None:
         try:
@@ -175,6 +195,10 @@ class XingDbMenuService:
             f"(처리 {target_count:,}개 / 기준일 완료 {completed_count + sector_daily:,}/{all_target_count:,}, "
             f"{total_elapsed // 60:02d}:{total_elapsed % 60:02d})",
         )
+
+        published_indices = self._index_publisher.publish(effective_as_of)
+        stages.append(StageResult("KOSPI·KOSDAQ 종합·업종지수 발행", True, published_indices))
+        self._emit(progress, f"KOSPI·KOSDAQ 종합·업종지수 {published_indices:,}건 검증·발행 완료")
 
         return ActionReport(
             MenuAction.FAST_DAILY, started, dt.datetime.now(), tuple(stages),
