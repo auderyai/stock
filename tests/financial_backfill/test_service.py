@@ -28,7 +28,7 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             {"status": "awaiting-local", "year": 2025},
-            service.cloud_collect_next(),
+            service.cloud_collect_next(years=(2025, 2024, 2023)),
         )
 
     def test_cloud_collection_requires_client(self) -> None:
@@ -47,7 +47,7 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            {"status": "awaiting-cloud", "years": [2025, 2024, 2023]},
+            {"status": "awaiting-cloud", "years": [2026, 2025, 2024, 2023]},
             service.sync_ready_local(),
         )
         drive.write_json.assert_not_called()
@@ -72,9 +72,27 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         service.sync_local = MagicMock(return_value={"status": "complete", "year": 2025})
 
         self.assertEqual(
-            {"status": "complete", "year": 2025}, service.sync_ready_local()
+            {"status": "complete", "year": 2025},
+            service.sync_ready_local(years=(2025, 2024, 2023)),
         )
         service.sync_local.assert_called_once_with(2025, years=(2025, 2024, 2023))
+
+    def test_existing_history_checkpoint_is_extended_with_current_year(self) -> None:
+        drive = MagicMock(root_folder_id="root")
+        document = {
+            "format_version": 1,
+            "year_order": [2025, 2024, 2023],
+            "years": {},
+        }
+        drive.read_json.return_value = document
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=None
+        )
+
+        self.assertEqual(
+            [2026, 2025, 2024, 2023], service.status()["year_order"]
+        )
+        drive.write_json.assert_called_once()
 
 
 if __name__ == "__main__":

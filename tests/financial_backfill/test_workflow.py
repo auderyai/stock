@@ -10,6 +10,7 @@ class OpenDartWorkflowTests(unittest.TestCase):
         text = (ROOT / ".github/workflows/stock-opendart-financial.yml").read_text("utf-8")
         self.assertIn("OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}", text)
         self.assertIn("menu5-opendart-financial:", text)
+        self.assertIn("--years 2026,2025,2024,2023", text)
         self.assertIn("timeout-minutes: 355", text)
         self.assertNotIn("crtfc_key", text)
 

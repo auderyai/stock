@@ -2,14 +2,14 @@
 
 ## 고정 순서
 
-실행 단위는 분기이고 완료 승인 단위는 연도다.
+실행 단위는 분기이고 완료 승인 단위는 현재 수집 가능한 기간 또는 완료 연도다.
 
-1. 2025년 Q1 → 반기 → Q3 → 사업보고서를 차례로 수집한다.
+1. 2026년 10월 현재 제출이 끝난 Q1 → 반기를 먼저 수집한다.
 2. 각 100개 회사 배치를 DuckDB로 검증하고 임시 PostgreSQL에 저장한다.
 3. 검증된 배치만 암호화하여 Google Drive에 체크포인트로 저장한다.
-4. 2025년 네 보고서가 모두 완료된 뒤 로컬 PC에 반영한다.
-5. 로컬 PostgreSQL의 0건·누락·멱등 검증이 끝난 뒤에만 2024년을 시작한다.
-6. 같은 방식으로 2023년까지 진행한다.
+4. 2026년 가용 보고서가 완료되면 로컬 PC에 반영한다.
+5. 로컬 PostgreSQL의 0건·누락·멱등 검증 후 2025 → 2024 → 2023년을 진행한다.
+6. 이후 2026년 Q3 등 새 기간이 제출되면 기존 체크포인트 뒤에 추가한다.
 
 GitHub Actions는 하루에 다음 미완료 보고서 하나를 실행한다. PC가 꺼져 있어도
 클라우드 수집은 계속되지만 다음 연도는 직전 연도의 로컬 완료 확인을 기다린다.
@@ -22,12 +22,12 @@ GitHub 저장소의 Actions secret `OPENDART_API_KEY`로만 공급한다. 기존
 
 ## 로컬 반영
 
-Drive에 해당 연도의 네 보고서가 모두 완료된 후 PowerShell에서 실행한다.
+Drive에 해당 연도의 현재 수집 대상 보고서가 모두 완료된 후 PowerShell에서 실행한다.
 
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2025,2024,2023 sync-local --year 2025
+  --years 2026,2025,2024,2023 sync-local --year 2026
 ```
 
 상태만 확인할 때는 다음 명령을 사용한다.
@@ -35,7 +35,7 @@ $env:PYTHONPATH='src'
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2025,2024,2023 status
+  --years 2026,2025,2024,2023 status
 ```
 
 완료된 다음 연도가 있는지 확인하고 있을 때만 반영하려면 다음 명령을 사용한다.
@@ -43,7 +43,7 @@ $env:PYTHONPATH='src'
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2025,2024,2023 sync-ready-local
+  --years 2026,2025,2024,2023 sync-ready-local
 ```
 
 `tools\setup\INSTALL_OPENDART_FINANCIAL_SYNC_ON_LOGON.cmd`를 한 번 실행하면 현재 사용자의

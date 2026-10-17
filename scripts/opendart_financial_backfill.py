@@ -14,6 +14,7 @@ from krx_research.cloud_sync.credentials import DriveCredentials
 from krx_research.cloud_sync.drive import GoogleDriveClient
 from krx_research.financial_backfill.client import OpenDartClient, OpenDartTransientError
 from krx_research.financial_backfill.service import (
+    DEFAULT_YEARS,
     FinancialBackfillContext,
     FinancialBackfillService,
 )
@@ -34,8 +35,8 @@ def parser() -> argparse.ArgumentParser:
         description="OpenDART 분기별 수집 → DuckDB 검증 → 암호화 Drive → 로컬 PostgreSQL"
     )
     result.add_argument(
-        "--years", type=_years, default=(2025, 2024, 2023),
-        help="최신 연도부터 진행할 완료 사업연도",
+        "--years", type=_years, default=DEFAULT_YEARS,
+        help="현재 가용 기간과 완료 사업연도를 진행할 내림차순 연도",
     )
     commands = result.add_subparsers(dest="command", required=True)
     cloud = commands.add_parser("cloud-menu5", help="다음 미완료 분기를 클라우드에서 수집")

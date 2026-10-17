@@ -23,6 +23,7 @@ from .staging import DuckDbFinancialStagingRepository
 
 
 METADATA_NAME = "financial-backfill.json"
+DEFAULT_YEARS = (2026, 2025, 2024, 2023)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +51,7 @@ class FinancialBackfillService:
         self,
         year: int,
         *,
-        years: tuple[int, ...] = (2025, 2024, 2023),
+        years: tuple[int, ...] = DEFAULT_YEARS,
         batch_size: int = 100,
         max_batches: int = 0,
     ) -> dict[str, Any]:
@@ -65,7 +66,8 @@ class FinancialBackfillService:
             ordered_years, metadata, year
         )
         year_state = (metadata["years"]).setdefault(str(year), {"periods": {}})
-        period = FinancialBackfillPolicy.next_period(year_state)
+        targets = self._target_periods(year_state, year)
+        period = FinancialBackfillPolicy.next_period(year_state, targets)
         if period is None:
             return {
                 "status": "awaiting-local" if not year_state.get("local_completed") else "complete",
@@ -78,20 +80,21 @@ class FinancialBackfillService:
     def cloud_collect_next(
         self,
         *,
-        years: tuple[int, ...] = (2025, 2024, 2023),
+        years: tuple[int, ...] = DEFAULT_YEARS,
         batch_size: int = 100,
         max_batches: int = 0,
     ) -> dict[str, Any]:
         metadata = self._metadata(list(years))
         for index, year in enumerate(years):
             state = (metadata.get("years") or {}).get(str(year), {})
+            targets = self._target_periods(state, year)
             if index and not (
                 (metadata.get("years") or {}).get(str(years[index - 1]), {}).get(
                     "local_completed"
                 )
             ):
                 return {"status": "awaiting-local", "year": years[index - 1]}
-            if FinancialBackfillPolicy.next_period(state) is not None:
+            if FinancialBackfillPolicy.next_period(state, targets) is not None:
                 return self.cloud_collect(
                     year,
                     years=years,
@@ -103,16 +106,20 @@ class FinancialBackfillService:
         return {"status": "complete", "years": list(years)}
 
     def sync_local(
-        self, year: int, *, years: tuple[int, ...] = (2025, 2024, 2023)
+        self, year: int, *, years: tuple[int, ...] = DEFAULT_YEARS
     ) -> dict[str, Any]:
         metadata = self._metadata(list(years))
         year_state = (metadata.get("years") or {}).get(str(year)) or {}
         periods = year_state.get("periods") or {}
+        targets = self._stored_targets(year_state)
         if any(
             not periods.get(period.label, {}).get("cloud_completed")
-            for period in FinancialPeriod
+            for period in targets
         ):
-            raise RuntimeError(f"{year}년 클라우드 4개 보고서가 아직 완료되지 않았습니다.")
+            required = ", ".join(period.label for period in targets)
+            raise RuntimeError(
+                f"{year}년 클라우드 수집 대상({required})이 아직 완료되지 않았습니다."
+            )
         applied: list[str] = []
         with self._connection() as connection, tempfile.TemporaryDirectory(
             prefix="stock-financial-local-"
@@ -120,7 +127,7 @@ class FinancialBackfillService:
             repository = FinancialRepository(connection)
             repository.initialize_schema()
             work = Path(temporary_name)
-            for period in FinancialPeriod:
+            for period in targets:
                 state = periods[period.label]
                 for record in state.get("batches", []):
                     if record.get("local_applied"):
@@ -138,7 +145,7 @@ class FinancialBackfillService:
                     self._write_metadata(metadata)
             expected_facts = sum(
                 int(periods[period.label].get("facts") or 0)
-                for period in FinancialPeriod
+                for period in targets
             )
             actual_facts = repository.year_fact_count(year)
             if not expected_facts or actual_facts < expected_facts:
@@ -151,7 +158,7 @@ class FinancialBackfillService:
         return {"status": "complete", "year": year, "applied_batches": applied}
 
     def sync_ready_local(
-        self, *, years: tuple[int, ...] = (2025, 2024, 2023)
+        self, *, years: tuple[int, ...] = DEFAULT_YEARS
     ) -> dict[str, Any]:
         """Apply the first cloud-complete year, otherwise leave local data untouched."""
         metadata = self._read_metadata(list(years))
@@ -162,15 +169,16 @@ class FinancialBackfillService:
             if state.get("local_completed"):
                 continue
             periods = state.get("periods") or {}
+            targets = self._stored_targets(state)
             if all(
                 periods.get(period.label, {}).get("cloud_completed")
-                for period in FinancialPeriod
+                for period in targets
             ):
                 return self.sync_local(year, years=years)
             return {"status": "awaiting-cloud", "year": year}
         return {"status": "up-to-date", "years": list(years)}
 
-    def status(self, years: tuple[int, ...] = (2025, 2024, 2023)) -> dict[str, Any]:
+    def status(self, years: tuple[int, ...] = DEFAULT_YEARS) -> dict[str, Any]:
         return self._metadata(list(years))
 
     def _collect_period(
@@ -286,6 +294,26 @@ class FinancialBackfillService:
         year_folder = self._context.drive.ensure_folder(str(year), root)
         return self._context.drive.ensure_folder(period.label, year_folder)
 
+    def _target_periods(
+        self, year_state: dict[str, Any], year: int
+    ) -> tuple[FinancialPeriod, ...]:
+        targets = FinancialBackfillPolicy.available_periods(year)
+        if not targets:
+            raise RuntimeError(f"{year}년은 아직 수집 가능한 정기보고서가 없습니다.")
+        labels = [period.label for period in targets]
+        previous = list(year_state.get("target_periods") or [])
+        if previous and labels[:len(previous)] != previous:
+            raise RuntimeError(f"{year}년 수집 대상 기간 순서가 기존 체크포인트와 다릅니다.")
+        if labels != previous:
+            year_state["target_periods"] = labels
+            year_state["local_completed"] = False
+        return targets
+
+    @staticmethod
+    def _stored_targets(year_state: dict[str, Any]) -> tuple[FinancialPeriod, ...]:
+        labels = year_state.get("target_periods") or [period.label for period in FinancialPeriod]
+        return tuple(FinancialPeriod.parse(label) for label in labels)
+
     def _metadata(self, years: list[int]) -> dict[str, Any]:
         document = self._read_metadata(years)
         if document is None:
@@ -301,8 +329,11 @@ class FinancialBackfillService:
             return None
         if document.get("format_version") != 1:
             raise RuntimeError("지원하지 않는 재무 백필 메타데이터 버전입니다.")
-        if list(document.get("year_order") or []) != years:
-            raise RuntimeError("기존 재무 백필 사업연도 순서와 요청이 다릅니다.")
+        stored = list(document.get("year_order") or [])
+        merged = FinancialBackfillPolicy.extend_year_order(stored, years)
+        if merged != stored:
+            document["year_order"] = merged
+            self._write_metadata(document)
         return document
 
     def _write_metadata(self, metadata: dict[str, Any]) -> None:

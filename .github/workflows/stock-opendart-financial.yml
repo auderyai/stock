@@ -62,7 +62,7 @@ jobs:
       - name: Collect next validated menu 5 financial period
         shell: bash
         run: |
-          args=(--years 2025,2024,2023 cloud-menu5 --batch-size "${{ inputs.batch_size || '100' }}")
+          args=(--years 2026,2025,2024,2023 cloud-menu5 --batch-size "${{ inputs.batch_size || '100' }}")
           if [[ -n "${{ inputs.year }}" ]]; then
             args+=(--year "${{ inputs.year }}")
           fi

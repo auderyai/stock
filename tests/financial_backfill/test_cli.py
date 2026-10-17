@@ -15,6 +15,10 @@ SPEC.loader.exec_module(CLI)
 
 
 class FinancialBackfillCliTests(unittest.TestCase):
+    def test_default_order_prioritizes_current_partial_year(self) -> None:
+        args = CLI.parser().parse_args(["status"])
+        self.assertEqual((2026, 2025, 2024, 2023), args.years)
+
     def test_years_are_parsed_in_one_unambiguous_argument(self) -> None:
         args = CLI.parser().parse_args(
             ["--years", "2025,2024,2023", "cloud-menu5", "--max-batches", "1"]
