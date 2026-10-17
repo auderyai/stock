@@ -24,7 +24,6 @@ from krx_research_nextgen.windows.scenario_window import ScenarioWindow
 from krx_research_nextgen.windows.repeated_screen_window import RepeatedScreenWindow
 from krx_research_nextgen.workers.task_runner import TaskRunner
 from krx_research_nextgen.widgets.calendar_date_edit import CalendarDateEdit
-from krx_research_nextgen.windows.research_archive_window import ResearchArchiveWindow
 from krx_research_nextgen.windows.daily_research_window import DailyResearchWindow, SPECS
 from krx_research_nextgen.windows.reusable_code_window import ReusableCodeWindow
 from krx_research.qt.presentation.error_presenter import user_friendly_error
@@ -33,10 +32,12 @@ from krx_research.qt.presentation.error_presenter import user_friendly_error
 class Stage4MainWindow(QMainWindow):
     """Legacy-compatible PyQt6 View; all data comes through controllers."""
 
-    def __init__(self, main_controller: MainWindowController, screening_controller: ScreeningController, auxiliary_controller, assistant_service) -> None:
+    def __init__(self, main_controller: MainWindowController, screening_controller: ScreeningController,
+                 auxiliary_controller, assistant_service, research_window_factory) -> None:
         super().__init__()
         self._main, self._screening, self._auxiliary = main_controller, screening_controller, auxiliary_controller
         self._assistant = assistant_service
+        self._research_window_factory = research_window_factory
         self._assistant.bind_numbered_screen_runner(self._run_numbered_screen)
         self._tasks = TaskRunner(self)
         self._results: list[ScreeningResult] = []
@@ -49,7 +50,7 @@ class Stage4MainWindow(QMainWindow):
         self._chart_windows: list[ChartWindow] = []
         self._scenario_windows: list[ScenarioWindow] = []
         self._repeated_windows: list[RepeatedScreenWindow] = []
-        self._research_windows: list[ResearchArchiveWindow] = []
+        self._research_windows: list[QMainWindow] = []
         self._daily_research_windows: list[DailyResearchWindow] = []
         self._code_library_window: ReusableCodeWindow | None = None
         self._navigation_context = None
@@ -380,7 +381,8 @@ class Stage4MainWindow(QMainWindow):
         window.show(); window.raise_()
 
     def _open_research_archive(self) -> None:
-        window = ResearchArchiveWindow(self); window.stock_requested.connect(lambda code: self._open_chart(code, "연구자료"))
+        window = self._research_window_factory(self)
+        window.stock_requested.connect(lambda code: self._open_chart(code, "연구자료"))
         self._research_windows.append(window)
         window.destroyed.connect(lambda _=None, w=window: self._research_windows.remove(w) if w in self._research_windows else None)
         window.show(); window.raise_()

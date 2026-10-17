@@ -19,6 +19,12 @@ class PatternSearchDialogTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    @staticmethod
+    def _dialog():
+        controller, chart_factory = MagicMock(), MagicMock()
+        chart_factory.return_value.destroyed.connect = MagicMock()
+        return PatternSearchDialog(controller, chart_factory), controller, chart_factory
+
     def test_job_menu_contains_pattern_search_as_number_three(self):
         with TemporaryDirectory() as directory:
             window = KrxJobMenuWindow(Path(directory))
@@ -26,32 +32,26 @@ class PatternSearchDialogTests(unittest.TestCase):
             window.close()
 
     def test_result_chart_uses_existing_navigable_chart(self):
-        with TemporaryDirectory() as directory:
-            dialog = PatternSearchDialog(
-                Path(directory), repository=MagicMock(), chart_service=MagicMock()
-            )
+        with TemporaryDirectory():
+            dialog, _controller, chart_factory = self._dialog()
             dialog._show_rows([
                 {"stock_code": "078350", "stock_name": "한양디지텍", "similarity_pct": 80},
                 {"stock_code": "000001", "stock_name": "상위종목", "similarity_pct": 95},
             ])
             self.assertEqual(dialog.table.frame.stock_code.tolist(), ["000001", "078350"])
             dialog.table.select_ticker("078350")
-            with patch("krx_research.qt.pattern_search.window.ChartWindow") as chart:
-                chart.return_value.destroyed.connect = MagicMock()
-                dialog._open_chart()
-            self.assertTrue(chart.call_args.kwargs["navigation_enabled"])
-            self.assertEqual(chart.call_args.args[1], "078350")
+            dialog._open_chart()
+            self.assertTrue(chart_factory.call_args.kwargs["navigation_enabled"])
+            self.assertEqual(chart_factory.call_args.kwargs["ticker"], "078350")
             self.assertEqual(
-                chart.call_args.kwargs["navigation_frame"].stock_code.tolist(),
+                chart_factory.call_args.kwargs["navigation_frame"].stock_code.tolist(),
                 ["000001", "078350"],
             )
             dialog.close()
 
     def test_box_mode_keeps_reference_security_and_hides_manual_thresholds(self):
-        with TemporaryDirectory() as directory:
-            dialog = PatternSearchDialog(
-                Path(directory), repository=MagicMock(), chart_service=MagicMock()
-            )
+        with TemporaryDirectory():
+            dialog, _controller, _chart_factory = self._dialog()
             dialog.mode.setCurrentIndex(1)
             self.assertTrue(dialog.security.isEnabled())
             self.assertFalse(dialog.average.isEnabled())
@@ -60,14 +60,12 @@ class PatternSearchDialogTests(unittest.TestCase):
             dialog.close()
 
     def test_partial_stock_name_offers_selectable_code(self):
-        repository = MagicMock()
-        repository.search_securities.return_value = [
+        controller = MagicMock()
+        controller.suggest_securities.return_value = [
             {"ticker": "078350", "name": "한양디지텍", "market": "KOSDAQ"}
         ]
-        with TemporaryDirectory() as directory:
-            dialog = PatternSearchDialog(
-                Path(directory), repository=repository, chart_service=MagicMock()
-            )
+        with TemporaryDirectory():
+            dialog = PatternSearchDialog(controller, MagicMock())
             dialog._suggest_security("한양")
             labels = dialog.security_completer.model.stringList()
             self.assertEqual(labels, ["078350  한양디지텍  [KOSDAQ]"])
@@ -82,10 +80,8 @@ class PatternSearchDialogTests(unittest.TestCase):
         )
 
     def test_clicking_date_field_opens_calendar(self):
-        with TemporaryDirectory() as directory:
-            dialog = PatternSearchDialog(
-                Path(directory), repository=MagicMock(), chart_service=MagicMock()
-            )
+        with TemporaryDirectory():
+            dialog, _controller, _chart_factory = self._dialog()
             dialog.show()
             QTest.mouseClick(dialog.start, Qt.LeftButton, pos=dialog.start.rect().center())
             self.app.processEvents()

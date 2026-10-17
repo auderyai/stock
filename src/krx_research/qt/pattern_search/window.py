@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
 from typing import Callable
 
@@ -10,18 +9,14 @@ from PySide6.QtWidgets import (
     QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 
-from krx_research.database import resolve_database_target
-from krx_research.qt.chart_window import ChartWindow
+from krx_research.qt.controllers.pattern_search_controller import PatternSearchController
 from krx_research.qt.presentation.column_catalog import label_for
 from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
-from krx_research.qt.services.chart_service import ChartService
-from krx_research.qt.services.box_breakout import PeriodPatternQuery, PeriodPatternSearchService
+from krx_research.qt.services.box_breakout import PeriodPatternQuery
 from krx_research.qt.services.pattern_similarity import (
-    MovingAverageKind, MovingAverageSpec, PatternSearchQuery, PatternSimilaritySearchService,
-    PatternVectorCache, PostgreSQLPatternRepository,
+    MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
 )
 from krx_research.qt.strategies.chart_navigation import SynchronizedChartStrategy
-from krx_research.ui.data import WorkstationData
 from krx_research.qt.widgets.result_table import ResultTable
 from krx_research.qt.widgets.calendar_date_edit import CalendarDateEdit
 from krx_research.qt.widgets.security_completer import SecurityCompleter
@@ -48,16 +43,12 @@ class SearchWorker(QObject):
 class PatternSearchDialog(QDialog):
     """Local-only GUI for deterministic similarity and box-breakout searches."""
 
-    def __init__(self, root: Path, parent=None, *, repository=None, chart_service=None):
+    def __init__(self, controller: PatternSearchController, chart_factory: Callable,
+                 parent=None):
         super().__init__(parent)
-        self._root, self._thread, self._worker = Path(root), None, None
+        self._controller, self._chart_factory = controller, chart_factory
+        self._thread, self._worker = None, None
         self._charts = []
-        target = resolve_database_target(self._root, read_only=True) if repository is None or chart_service is None else None
-        self._repository = repository or PostgreSQLPatternRepository(target)
-        self._chart_service = chart_service or ChartService(WorkstationData(target))
-        cache = PatternVectorCache(self._root / ".local_cache" / "pattern_vectors")
-        self._pattern_service = PatternSimilaritySearchService(self._repository, cache)
-        self._period_service = PeriodPatternSearchService(self._repository)
         self._presenter = PatternResultPresenter()
         self._chart_strategy = SynchronizedChartStrategy(self._create_chart, self._keep_chart)
         self.setWindowTitle("메뉴 3 · 주가 패턴 검색")
@@ -120,7 +111,7 @@ class PatternSearchDialog(QDialog):
 
     def _suggest_security(self, query: str) -> None:
         try:
-            self.security_completer.set_matches(self._pattern_service.suggest_securities(query))
+            self.security_completer.set_matches(self._controller.suggest_securities(query))
         except Exception:
             self.security_completer.set_matches([])
 
@@ -143,14 +134,14 @@ class PatternSearchDialog(QDialog):
         security = SecurityCompleter.value(self.security.text())
         if self.mode.currentIndex() == 1:
             query = PeriodPatternQuery(security, start, end, self.top.value())
-            return lambda: self._period_service.search(query)
+            return self._controller.command(query)
         periods = tuple(map(int, filter(None, re.split(r"[ ,]+", self.periods.text().strip()))))
         query = PatternSearchQuery(
             security, start, end,
             MovingAverageSpec(MovingAverageKind(self.average.currentText()), periods),
             self.top.value(), True, self.volume.isChecked(),
         )
-        return lambda: self._pattern_service.search(query)
+        return self._controller.command(query)
 
     @Slot(list)
     def _show_rows(self, rows: list[dict]) -> None:
@@ -173,8 +164,8 @@ class PatternSearchDialog(QDialog):
 
     def _create_chart(self, *, ticker: str, quote_venue: str, parent,
                       navigation_enabled: bool, navigation_frame=None, navigation_labels=None):
-        return ChartWindow(
-            self._chart_service, ticker, quote_venue=quote_venue, parent=parent,
+        return self._chart_factory(
+            ticker=ticker, quote_venue=quote_venue, parent=parent,
             navigation_enabled=navigation_enabled, navigation_frame=navigation_frame,
             navigation_labels=navigation_labels,
         )

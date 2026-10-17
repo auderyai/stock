@@ -6,6 +6,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+NEXTGEN = ROOT / "nextgen" / "src"
 errors: list[str] = []
 
 PROHIBITED_IMPORTS = ("tkinter", "sqlite3", "pymysql", "mysql", "mariadb", "PyQt5", "PyQt6")
@@ -69,6 +70,10 @@ required = [
     "src/krx_research/qt/models/date_range.py",
     "src/krx_research/qt/presentation/investor_presenter.py",
     "src/krx_research/qt/application/window_factory.py",
+    "src/krx_research/qt/application/job_menu_dependencies.py",
+    "src/krx_research/qt/controllers/pattern_search_controller.py",
+    "src/krx_research/qt/repositories/pattern_repository.py",
+    "src/krx_research/qt/repositories/assistant_repository.py",
     "src/krx_research/qt/windows/scenario_window.py",
     "src/krx_research/qt/controllers/scenario_controller.py",
     "src/krx_research/qt/services/scenario_service.py",
@@ -82,12 +87,32 @@ for rel in required:
     if not (ROOT / rel).exists():
         errors.append(f"Missing OOP layer: {rel}")
 
-# Views/widgets must not import DB directly.
-view_files = list((SRC/"krx_research"/"qt"/"windows").glob("*.py")) + list((SRC/"krx_research"/"qt"/"widgets").glob("*.py"))
+# Views/widgets must not import DB or repositories directly. Search recursively so
+# feature subpackages cannot bypass the same invariant.
+view_roots = (
+    SRC/"krx_research"/"qt"/"windows",
+    SRC/"krx_research"/"qt"/"widgets",
+    SRC/"krx_research"/"qt"/"pattern_search",
+    SRC/"krx_research"/"qt"/"job_menu",
+    NEXTGEN/"krx_research_nextgen"/"windows",
+)
+view_files = [path for root in view_roots if root.exists() for path in root.rglob("*.py")]
 for p in view_files:
     for mod in imports_of(p):
+        if mod.startswith(("krx_research.database", "krx_research.data_engine.postgresql",
+                           "krx_research.qt.repositories", "krx_research_nextgen.repositories")):
+            errors.append(f"View imports DB/repository directly: {p.relative_to(ROOT)}")
+
+# Services may depend on repository interfaces/objects, but may not open a DB
+# connection themselves. SQL execution belongs to repositories/infrastructure.
+service_roots = (
+    SRC/"krx_research"/"qt"/"services",
+    NEXTGEN/"krx_research_nextgen"/"services",
+)
+for p in (path for root in service_roots if root.exists() for path in root.rglob("*.py")):
+    for mod in imports_of(p):
         if mod.startswith(("krx_research.database", "krx_research.data_engine.postgresql")):
-            errors.append(f"View imports DB directly: {p.relative_to(ROOT)}")
+            errors.append(f"Service imports DB infrastructure directly: {p.relative_to(ROOT)}")
 
 controller_path = SRC/"krx_research"/"qt"/"controllers"/"workstation_controller.py"
 if controller_path.exists():

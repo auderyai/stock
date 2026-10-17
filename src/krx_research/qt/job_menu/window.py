@@ -16,11 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from krx_research.application.job_menu.models import JobKind, JobRequest, LegacyJobSpec
-from krx_research.database import resolve_database_target
-from krx_research.qt.services.security_search_service import SecuritySearchService
 from krx_research.qt.widgets.calendar_date_edit import CalendarDateEdit
 from krx_research.qt.widgets.security_completer import SecurityCompleter
-from krx_research.ui.data import WorkstationData
 from .controller import JobMenuController
 
 
@@ -106,10 +103,13 @@ class DateDialog(QDialog):
 
 
 class KrxJobMenuWindow(QMainWindow):
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, *, pattern_dialog_factory: Callable | None = None,
+                 security_search: Callable | None = None) -> None:
         super().__init__()
         self._root = project_root
         self._controller = JobMenuController(project_root, self)
+        self._pattern_dialog_factory = pattern_dialog_factory
+        self._security_search = security_search
         self._jobs = self._load_jobs()
         self.setWindowTitle("KRX 작업 메뉴 · PySide6 V42")
         self.resize(820, 620)
@@ -170,8 +170,10 @@ class KrxJobMenuWindow(QMainWindow):
         job: UiJob = item.data(Qt.UserRole)
         self.log.clear()
         if job.number == 3:
-            from krx_research.qt.pattern_search import PatternSearchDialog
-            PatternSearchDialog(self._root, self).exec()
+            if self._pattern_dialog_factory is None:
+                QMessageBox.warning(self, "실행 불가", "패턴 검색 의존성이 준비되지 않았습니다.")
+                return
+            self._pattern_dialog_factory(self).exec()
             return
         if not job.integrated:
             if job.legacy is None:
@@ -199,11 +201,11 @@ class KrxJobMenuWindow(QMainWindow):
                 return
             self._controller.run(JobRequest(JobKind(job.number), end=dialog.value()))
             return
-        security_search = SecuritySearchService(
-            WorkstationData(resolve_database_target(self._root, read_only=True))
-        )
+        if self._security_search is None:
+            QMessageBox.warning(self, "실행 불가", "종목 검색 의존성이 준비되지 않았습니다.")
+            return
         range_dialog = RangeDialog(
-            job.title, menu=job.number, security_search=security_search.search, parent=self
+            job.title, menu=job.number, security_search=self._security_search, parent=self
         )
         if range_dialog.exec() == QDialog.Accepted:
             self._controller.run(range_dialog.request())
@@ -330,7 +332,12 @@ def main() -> int:
     root = find_project_root()
     _runtime_log(f"[GUI] project_root={root}")
 
-    window = KrxJobMenuWindow(root)
+    from krx_research.qt.application.job_menu_dependencies import JobMenuDependencies
+    dependencies = JobMenuDependencies(root)
+    window = KrxJobMenuWindow(
+        root, pattern_dialog_factory=dependencies.pattern_dialog,
+        security_search=dependencies.security_search,
+    )
     _runtime_log("[GUI] window constructed")
 
     window.showNormal()

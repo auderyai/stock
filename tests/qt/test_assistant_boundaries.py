@@ -4,8 +4,8 @@ from datetime import date
 import unittest
 from unittest.mock import patch
 
-from krx_research.qt.services.assistant_service import ReadOnlyDatabaseTool
 from krx_research.qt.services.assistant_service import AssistantService
+from krx_research.qt.repositories.assistant_repository import ReadOnlyDatabaseTool
 from krx_research.qt.services.assistant_workspace import OneOffWorkspace, ReusableCodeLibrary
 
 
@@ -60,7 +60,7 @@ class AssistantBoundaryTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *_args): pass
 
-        with patch("krx_research.qt.services.assistant_service.open_research_store",
+        with patch("krx_research.qt.repositories.assistant_repository.open_research_store",
                    return_value=Store()):
             with self.assertRaisesRegex(ValueError, "2행을 초과"):
                 tool.query("SELECT value FROM x", limit=2, require_complete=True)

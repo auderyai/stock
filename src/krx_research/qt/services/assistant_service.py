@@ -13,7 +13,6 @@ from typing import Any
 import pandas as pd
 import requests
 
-from krx_research.database import open_research_store
 from krx_research.application.openai_credentials import OpenAICredentialResolver
 from krx_research.qt.models.assistant import AssistantReply
 from krx_research.qt.services.codex_subscription_backend import CodexSubscriptionBackend
@@ -22,8 +21,10 @@ from krx_research.qt.presentation.pattern_presenter import PatternResultPresente
 from krx_research.qt.services.assistant_workspace import OneOffWorkspace, ReusableCodeLibrary
 from krx_research.qt.services.pattern_similarity import (
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
-    PatternSimilaritySearchService, PatternVectorCache, PostgreSQLPatternRepository,
+    PatternSimilaritySearchService, PatternVectorCache,
 )
+from krx_research.qt.repositories.assistant_repository import ReadOnlyDatabaseTool
+from krx_research.qt.repositories.pattern_repository import PostgreSQLPatternRepository
 from krx_research.research_archive import ResearchArchiveService
 
 
@@ -42,53 +43,6 @@ DB 테이블이나 열이 확실하지 않으면 describe_database를 먼저 호
 사용자가 화면의 번호 항목 실행을 지시하면 run_numbered_screen을 사용하고, 후속 분석에는 get_last_screen_result로 직전 결과를 재사용한다.
 DB 결과를 표로 보여줄 때는 마지막 query_database 결과를 사용하고 답변은 한국어로 간결하고 검증 가능하게 쓴다.
 웹을 사용했다면 출처 URL을 보존한다. 투자 판단을 단정하지 말고 사실, 추론, 불확실성을 구분한다."""
-
-
-class ReadOnlyDatabaseTool:
-    """Strict read-only SQL gateway with row and execution limits."""
-
-    _BLOCKED = re.compile(
-        r"\b(insert|update|delete|merge|alter|drop|truncate|create|grant|revoke|copy|call|do|"
-        r"vacuum|analyze|refresh|reindex|cluster|comment|security|set|reset|listen|notify|"
-        r"pg_[a-z_]+|dblink|nextval|setval|lo_import|lo_export|into)\b|\bfor\s+(update|share)\b",
-        re.I,
-    )
-    def __init__(self, database_target, *, limit: int = 500, max_limit: int = 500_000):
-        self.database_target, self.limit, self.max_limit = database_target, int(limit), int(max_limit)
-
-    def query(self, sql: str, *, limit: int | None = None,
-              require_complete: bool = False) -> pd.DataFrame:
-        statement = str(sql).strip().rstrip(";").strip()
-        if not re.match(r"^(select|with)\b", statement, re.I) or self._BLOCKED.search(statement):
-            raise ValueError("DB 도구는 읽기 전용 SELECT/CTE만 허용합니다.")
-        if ";" in statement or "--" in statement or "/*" in statement:
-            raise ValueError("다중 문장과 SQL 주석은 허용하지 않습니다.")
-        row_limit = self.limit if limit is None else min(max(int(limit), 1), self.max_limit)
-        wrapped = f"SELECT * FROM ({statement}) AS assistant_result LIMIT {row_limit + 1}"
-        with open_research_store(self.database_target, read_only=True) as store:
-            store.conn.execute("SET statement_timeout TO '20s'")
-            rows = store.conn.execute(wrapped).fetchall()
-        truncated = len(rows) > row_limit
-        if truncated and require_complete:
-            raise ValueError(
-                f"분석 입력이 {row_limit:,}행을 초과했습니다. 기간 또는 대상 범위를 나누십시오."
-            )
-        frame = pd.DataFrame(rows[:row_limit])
-        frame.attrs["truncated"] = truncated
-        return frame
-
-    def catalog(self) -> list[dict[str, str]]:
-        """Return visible Stock tables and columns without exposing data."""
-        sql = """
-            SELECT table_schema, table_name, column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY table_schema, table_name, ordinal_position
-            LIMIT 1000
-        """
-        with open_research_store(self.database_target, read_only=True) as store:
-            rows = store.conn.execute(sql).fetchall()
-        return [dict(row) for row in rows]
 
 
 class StockFileSearchTool:
