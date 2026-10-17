@@ -56,7 +56,9 @@ class ChartPatternFeatureService:
     def market_features(self, frame: pd.DataFrame, stock: pd.DataFrame, start, end) -> dict:
         names = {code: name for name, code in self.policy.market_context.indices}
         policy = self.policy.market_context
-        stock_returns = self._returns(stock, start, end, "close")
+        stock_returns = self._returns_until(
+            stock, end, "close", policy.regime_lookback_days
+        )
         result = {}
         for code, group in frame.groupby("index_code"):
             ordered = group.sort_values("trade_date").set_index("trade_date")
@@ -69,7 +71,7 @@ class ChartPatternFeatureService:
             segment = segment[segment.index.date <= end]
             if len(segment) < 2:
                 raise ValueError(f"{names.get(str(code), code)} 학습기간 지수 자료가 부족합니다.")
-            market_returns = returns[(returns.index.date >= start) & (returns.index.date <= end)]
+            market_returns = returns[returns.index.date <= end].tail(policy.regime_lookback_days)
             relationship = self._relationship(stock_returns, market_returns)
             sample_return = (segment.iloc[-1] / segment.iloc[0] - 1.0) * 100
             result[names.get(str(code), str(code))] = {
@@ -107,6 +109,12 @@ class ChartPatternFeatureService:
         ordered = frame.sort_values("trade_date").set_index("trade_date")
         returns = pd.to_numeric(ordered[column], errors="raise").pct_change(fill_method=None)
         return returns[(returns.index.date >= start) & (returns.index.date <= end)].dropna()
+
+    @staticmethod
+    def _returns_until(frame: pd.DataFrame, end, column: str, limit: int) -> pd.Series:
+        ordered = frame.sort_values("trade_date").set_index("trade_date")
+        returns = pd.to_numeric(ordered[column], errors="raise").pct_change(fill_method=None)
+        return returns[returns.index.date <= end].dropna().tail(limit)
 
     @staticmethod
     def _relationship(stock: pd.Series, market: pd.Series) -> dict:

@@ -72,6 +72,21 @@ class ChartPatternFeatureServiceTests(unittest.TestCase):
         self.assertTrue(all("stock_beta" in value for value in context.values()))
         self.assertTrue(all("stock_excess_return_pct" in value for value in context.values()))
 
+    def test_short_pattern_uses_trailing_history_for_market_relationship(self):
+        dates = pd.bdate_range("2025-01-01", periods=320)
+        history = pd.DataFrame({
+            "trade_date": dates, "close": range(1000, 1320),
+            "high": range(1001, 1321), "low": range(999, 1319), "volume": [100] * 320,
+        })
+        index = pd.DataFrame({
+            "index_code": ["1001"] * 320 + ["2001"] * 320,
+            "trade_date": list(dates) * 2,
+            "close_price": list(range(2000, 2320)) + list(range(1500, 1820)),
+        })
+        start, end = dates[-15].date(), dates[-1].date()
+        context = ChartPatternFeatureService().market_features(index, history, start, end)
+        self.assertTrue(all(value["aligned_observations"] >= 20 for value in context.values()))
+
 
 if __name__ == "__main__":
     unittest.main()
