@@ -94,6 +94,24 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         )
         drive.write_json.assert_called_once()
 
+    def test_ready_sync_revalidates_completed_year_until_drive_is_cleaned(self) -> None:
+        drive = MagicMock(root_folder_id="root")
+        drive.read_json.return_value = {
+            "format_version": 1,
+            "year_order": [2025],
+            "years": {"2025": {"local_completed": True, "drive_cleaned": False}},
+        }
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=None
+        )
+        service.sync_local = MagicMock(return_value={"status": "complete", "year": 2025})
+
+        self.assertEqual(
+            {"status": "complete", "year": 2025},
+            service.sync_ready_local(years=(2025,)),
+        )
+        service.sync_local.assert_called_once_with(2025, years=(2025,))
+
 
 if __name__ == "__main__":
     unittest.main()

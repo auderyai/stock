@@ -16,6 +16,7 @@ from krx_research.cloud_sync.models import FINANCIAL_TABLES
 from krx_research.data_engine.config import database_conninfo
 
 from .client import OpenDartClient
+from .cleanup import FinancialDriveCleanupService
 from .models import FinancialBatch, FinancialPeriod
 from .policy import FinancialBackfillPolicy
 from .repository import FinancialRepository
@@ -148,14 +149,20 @@ class FinancialBackfillService:
                 for period in targets
             )
             actual_facts = repository.year_fact_count(year)
-            if not expected_facts or actual_facts < expected_facts:
+            if not expected_facts or actual_facts != expected_facts:
                 raise RuntimeError(
                     f"{year}년 로컬 재무자료 검증 실패: "
                     f"기대={expected_facts}, 실제={actual_facts}"
                 )
-        year_state["local_completed"] = True
+        year_state.update(local_completed=True, local_verified_facts=actual_facts)
         self._write_metadata(metadata)
-        return {"status": "complete", "year": year, "applied_batches": applied}
+        deleted = FinancialDriveCleanupService(
+            self._context.drive, self._write_metadata
+        ).cleanup(metadata, year, targets)
+        return {
+            "status": "complete", "year": year,
+            "applied_batches": applied, "deleted_drive_files": deleted,
+        }
 
     def sync_ready_local(
         self, *, years: tuple[int, ...] = DEFAULT_YEARS
@@ -166,6 +173,8 @@ class FinancialBackfillService:
             return {"status": "awaiting-cloud", "years": list(years)}
         for year in years:
             state = (metadata.get("years") or {}).get(str(year), {})
+            if state.get("local_completed") and not state.get("drive_cleaned"):
+                return self.sync_local(year, years=years)
             if state.get("local_completed"):
                 continue
             periods = state.get("periods") or {}
