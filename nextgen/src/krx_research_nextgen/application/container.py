@@ -5,11 +5,13 @@ from krx_research_nextgen.controllers.screening_controller import ScreeningContr
 from krx_research_nextgen.controllers.auxiliary_controller import AuxiliaryController
 from krx_research_nextgen.controllers.research_archive_controller import ResearchArchiveController
 from krx_research_nextgen.repositories.auxiliary_repository import AuxiliaryRepository
+from krx_research_nextgen.repositories.bollinger_breadth_repository import BollingerBreadthRepository
 from krx_research_nextgen.repositories.postgresql_chart_repository import PostgreSQLChartRepository
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
 from krx_research_nextgen.repositories.realtime_screening_repository import RealtimeScreeningRepository
 from krx_research_nextgen.repositories.security_repository import SecurityRepository
 from krx_research_nextgen.services.market_chart_service import MarketChartService
+from krx_research_nextgen.services.bollinger_breadth_service import BollingerBreadthService
 from krx_research_nextgen.services.screening_service import ScreeningService
 from krx_research_nextgen.services.security_search_service import SecuritySearchService
 from krx_research_nextgen.services.auxiliary_service import AuxiliaryService
@@ -31,6 +33,7 @@ class ApplicationContainer:
         self.chart_repository = PostgreSQLChartRepository()
         self.security_repository = SecurityRepository()
         self.screening_repository = ScreeningRepository()
+        self.bollinger_breadth_repository = BollingerBreadthRepository()
         self.main_controller = MainWindowController(
             SecuritySearchService(self.security_repository),
             MarketChartService(self.chart_repository),
@@ -43,7 +46,11 @@ class ApplicationContainer:
         self._research_service = ResearchArchiveService(database_target, Path(r"C:\stock"))
         self.window = Stage4MainWindow(
             self.main_controller,
-            ScreeningController(ScreeningService(self.screening_repository, self.realtime_screening_repository)),
+            ScreeningController(ScreeningService(
+                self.screening_repository,
+                self.realtime_screening_repository,
+                BollingerBreadthService(self.screening_repository, self.bollinger_breadth_repository),
+            )),
             self.auxiliary_controller,
             self.assistant_service,
             self._research_window,

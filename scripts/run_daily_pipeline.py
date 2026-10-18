@@ -15,6 +15,7 @@ CORE=ROOT/'scripts'/'run_daily_pipeline_v39_core.py'
 sys.path.insert(0,str(ROOT/'src'))
 
 from krx_research.collectors.xing.worker_runtime import Xing32Environment
+from krx_research.data_engine.cli import resolve_scheduled_update_date
 
 
 def _as_of(argv:list[str]) -> dt.date:
@@ -31,9 +32,10 @@ def main(argv:list[str]|None=None) -> int:
     if not CORE.is_file():
         print(f'[ERROR] preserved daily pipeline not found: {CORE}',file=sys.stderr,flush=True)
         return 90
-    day=_as_of(args)
+    requested_day=_as_of(args)
+    day=resolve_scheduled_update_date(requested_day)
     now=dt.datetime.now()
-    if day>=now.date() and now.time()<dt.time(20,10):
+    if requested_day>=now.date() and day>=now.date() and now.time()<dt.time(20,10):
         print('당일 확정 DB 갱신은 20:10 이후에만 실행할 수 있습니다.',file=sys.stderr,flush=True)
         return 4
 
@@ -41,6 +43,14 @@ def main(argv:list[str]|None=None) -> int:
     if core.returncode:
         print(f'[V40] 기존 KRX pipeline 실패({core.returncode}); LS DB 단계는 실행하지 않습니다.',file=sys.stderr,flush=True)
         return core.returncode
+
+    breadth=subprocess.run([
+        sys.executable,str(ROOT/'scripts'/'persist_daily_bollinger_breadth.py'),
+        '--as-of',day.isoformat(),
+    ],cwd=ROOT,check=False)
+    if breadth.returncode:
+        print(f'[V40] 볼린저 시장 집계 실패({breadth.returncode})',file=sys.stderr,flush=True)
+        return breadth.returncode
 
     xing = Xing32Environment(ROOT).inspect()
     if not xing.available:

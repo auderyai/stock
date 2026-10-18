@@ -10,6 +10,8 @@ class ScreenSpec:
     title: str
     kind: ScreeningKind | None
     market: str = "ALL"
+    uses_rank_limit: bool = True
+    database_only: bool = False
 
 
 SCREENS = (
@@ -33,4 +35,6 @@ SCREENS = (
     ScreenSpec("KOSDAQ 거래대금 주간 Top", ScreeningKind.WEEKLY_TURNOVER_TOP, "KOSDAQ"),
     ScreenSpec("KOSPI+KOSDAQ 거래대금 주간 Top", ScreeningKind.WEEKLY_TURNOVER_TOP, "KOSPI+KOSDAQ"),
     ScreenSpec("20일선+주도섹터", ScreeningKind.EMA20_LEADING_SECTOR, "KOSPI+KOSDAQ"),
+    ScreenSpec("당일 볼린저밴드 상단 돌파", ScreeningKind.DAILY_BOLLINGER_UPPER_BREAKOUT, "KOSPI+KOSDAQ", False, True),
+    ScreenSpec("당일 볼린저밴드 하단 돌파", ScreeningKind.DAILY_BOLLINGER_LOWER_BREAKOUT, "KOSPI+KOSDAQ", False, True),
 )

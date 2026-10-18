@@ -5,17 +5,33 @@ from dataclasses import replace
 from krx_research_nextgen.infrastructure.task_logging import TaskLog
 from krx_research_nextgen.models.screening import DateRange, RepeatedScreenResult, ScreeningKind, ScreeningQuery, ScreeningResult
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
+from krx_research_nextgen.services.bollinger_breadth_service import BollingerBreadthService
 
 
 WEEKLY_KINDS = {ScreeningKind.WEEKLY_GAINERS, ScreeningKind.WEEKLY_TURNOVER_TOP, ScreeningKind.BOLLINGER_BREAKOUT}
 
 
 class ScreeningService:
-    def __init__(self, repository: ScreeningRepository, realtime_repository=None) -> None:
+    def __init__(self, repository: ScreeningRepository, realtime_repository=None,
+                 bollinger_breadth: BollingerBreadthService | None = None) -> None:
         self._repository = repository
         self._realtime = realtime_repository
+        self._bollinger_breadth = bollinger_breadth
 
     def run(self, query: ScreeningQuery, *, period: DateRange | None = None) -> list[ScreeningResult]:
+        if query.kind in {
+            ScreeningKind.DAILY_BOLLINGER_UPPER_BREAKOUT,
+            ScreeningKind.DAILY_BOLLINGER_LOWER_BREAKOUT,
+        }:
+            if query.source_mode != "database":
+                raise ValueError("당일 볼린저밴드 돌파는 종가가 확정된 PostgreSQL 자료로만 판정합니다.")
+            if self._bollinger_breadth is None:
+                raise RuntimeError("볼린저 시장 집계 서비스가 구성되지 않았습니다.")
+            with TaskLog("bollinger_breadth_screening", kind=query.kind.value,
+                         market=query.market, as_of_date=query.as_of_date) as task:
+                rows = self._bollinger_breadth.run(query)
+                task.info(f"result_count={len(rows)}")
+                return rows
         if query.source_mode == "realtime":
             if self._realtime is None:
                 raise RuntimeError("실시간 조회 서비스가 구성되지 않았습니다.")
@@ -129,7 +145,7 @@ class ScreeningService:
     def _rows_by_date(
         self, query: ScreeningQuery, dates: list[str]
     ) -> list[tuple[str, list[ScreeningResult]]]:
-        return [(day, self._repository.run(replace(query, as_of_date=day))) for day in dates]
+        return [(day, self.run(replace(query, as_of_date=day))) for day in dates]
 
     def ensure_performance_indexes(self) -> list[dict[str, str]]:
         with TaskLog(

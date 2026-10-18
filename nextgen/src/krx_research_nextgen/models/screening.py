@@ -10,6 +10,8 @@ class ScreeningKind(str, Enum):
     HIGH_52W = "52주 신고가"
     NEAR_HIGH_52W = "52주 최고가 대비 종가 구간"
     BOLLINGER_BREAKOUT = "주봉 볼린저 돌파"
+    DAILY_BOLLINGER_UPPER_BREAKOUT = "당일 볼린저밴드 상단 돌파"
+    DAILY_BOLLINGER_LOWER_BREAKOUT = "당일 볼린저밴드 하단 돌파"
     DAILY_GAINERS = "당일 상승률 TOP"
     WEEKLY_GAINERS = "주간 상승률 TOP"
     TURNOVER_TOP = "거래대금 TOP"

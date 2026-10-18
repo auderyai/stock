@@ -41,20 +41,19 @@ class PostgreSQLSettings:
     preferred_master_table: str = "security_master"
 
     @classmethod
-    def from_c_stock_env(cls) -> "PostgreSQLSettings":
+    def from_c_stock_env(cls, *, read_only: bool = True) -> "PostgreSQLSettings":
         values = _read_env()
         host = _first(values, ("KRX_DB_HOST", "PGHOST", "DB_HOST"), "127.0.0.1")
         port = int(_first(values, ("KRX_DB_PORT", "PGPORT", "DB_PORT"), "5432"))
         dbname = _first(values, ("KRX_DB_NAME", "PGDATABASE", "DB_NAME"), "krx_research")
-        user = _first(
-            values,
-            ("KRX_DB_READ_USER", "KRX_DB_USER", "KRX_DB_WRITE_USER", "PGUSER", "DB_USER"),
-            "krx_writer",
-        )
-        password = _first(
-            values,
-            ("KRX_DB_READ_PASSWORD", "KRX_DB_PASSWORD", "KRX_DB_WRITE_PASSWORD", "PGPASSWORD", "DB_PASSWORD"),
-        )
+        user_keys = (("KRX_DB_READ_USER", "KRX_DB_USER", "KRX_DB_WRITE_USER", "PGUSER", "DB_USER")
+                     if read_only else
+                     ("KRX_DB_WRITE_USER", "KRX_DB_USER", "PGUSER", "DB_USER"))
+        password_keys = (("KRX_DB_READ_PASSWORD", "KRX_DB_PASSWORD", "KRX_DB_WRITE_PASSWORD", "PGPASSWORD", "DB_PASSWORD")
+                         if read_only else
+                         ("KRX_DB_WRITE_PASSWORD", "KRX_DB_PASSWORD", "PGPASSWORD", "DB_PASSWORD"))
+        user = _first(values, user_keys, "krx_writer")
+        password = _first(values, password_keys)
         if not password:
             raise RuntimeError("PostgreSQL password is missing in C:\\stock\\.env")
         if port == 3306:

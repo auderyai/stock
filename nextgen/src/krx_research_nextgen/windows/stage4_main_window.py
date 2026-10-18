@@ -144,6 +144,7 @@ class Stage4MainWindow(QMainWindow):
         self.search_button.clicked.connect(self._search_now); self.search_edit.returnPressed.connect(self._search_now)
         self.search_edit.textChanged.connect(self._search_timer.start); self._search_timer.timeout.connect(self._search_now)
         self.run_button.clicked.connect(self._run_selected); self.screen_list.itemDoubleClicked.connect(lambda _: self._run_selected())
+        self.screen_list.currentRowChanged.connect(self._screen_changed)
         self.repeated_button.clicked.connect(self._run_repeated)
         self.chart_button.clicked.connect(self._open_selected_chart); self.result_table.itemDoubleClicked.connect(lambda _: self._open_selected_chart())
         self.result_table.itemSelectionChanged.connect(self._sync_selection)
@@ -187,6 +188,17 @@ class Stage4MainWindow(QMainWindow):
 
     def _selected_spec(self) -> ScreenSpec | None:
         row = self.screen_list.currentRow(); return SCREENS[row] if 0 <= row < len(SCREENS) else None
+
+    def _screen_changed(self, _row: int) -> None:
+        spec = self._selected_spec()
+        uses_limit = spec is None or spec.uses_rank_limit
+        self.rank_limit.setEnabled(uses_limit)
+        self.rank_limit.setToolTip("" if uses_limit else "이 항목은 해당 종목 전체를 출력하므로 순위를 제한하지 않습니다.")
+        database_only = spec is not None and spec.database_only
+        if database_only:
+            self.source.setCurrentIndex(self.source.findData("database"))
+        self.source.setEnabled(not database_only)
+        self.source.setToolTip("종가 확정값으로만 판정합니다." if database_only else "")
 
     def _run_selected(self) -> None:
         spec = self._selected_spec()

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import date as calendar_date
 from time import perf_counter
 
+import pandas as pd
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
@@ -147,6 +148,35 @@ class ScreeningRepository:
         if not row or not row["d"]:
             raise RuntimeError("OHLCV table has no trade date.")
         return str(row["d"])
+
+    def bollinger_input(self, as_of_date: str | None, *, lookback: int = 260) -> pd.DataFrame:
+        """Return one bounded, complete KOSPI/KOSDAQ close history for breadth calculation."""
+        dates = self._recent_trade_dates(lookback, as_of_date)
+        if len(dates) < 21:
+            raise RuntimeError("볼린저밴드 계산에 필요한 거래일이 21일 미만입니다.")
+        o, m, ot, mt, market_expr, spac_filter = self._common_parts()
+        amount = (
+            sql.SQL("COALESCE(o.{x}::double precision,0)").format(x=sql.Identifier(o["trading_value"]))
+            if "trading_value" in o else
+            sql.SQL("o.{c}::double precision*COALESCE(o.{v}::double precision,0)").format(
+                c=sql.Identifier(o["close"]), v=sql.Identifier(o["volume"])
+            )
+        )
+        query = sql.SQL("""
+            SELECT o.{code}::text stock_code, o.{date}::date trade_date,
+                   o.{close}::double precision close, {amount} trading_value,
+                   m.{name}::text stock_name, {market} market
+            FROM {ot} o JOIN {mt} m ON m.{mcode}=o.{code}
+            WHERE o.{date}::date BETWEEN %s::date AND %s::date
+              AND upper({market}) IN ('KOSPI','KOSDAQ') AND {spac}
+            ORDER BY o.{code}, o.{date}
+        """).format(
+            code=sql.Identifier(o["stock_code"]), date=sql.Identifier(o["trade_date"]),
+            close=sql.Identifier(o["close"]), amount=amount,
+            name=sql.Identifier(m["stock_name"]), market=market_expr,
+            ot=ot, mt=mt, mcode=sql.Identifier(m["stock_code"]), spac=spac_filter,
+        )
+        return pd.DataFrame(self._conn.execute(query, (dates[-1], dates[0])).fetchall())
 
     def earliest_trade_date(self) -> str:
         c = self._ohlcv.columns
@@ -399,13 +429,13 @@ class ScreeningRepository:
         else:
             raise ValueError(f"Unsupported screening kind: {query.kind}")
         enrich_started = perf_counter()
-        rows = self._enrich_display_fields(rows)
+        rows = self.enrich_display_fields(rows)
         self.last_metrics["display_enrichment_seconds"] = perf_counter() - enrich_started
         self.last_metrics["repository_total_seconds"] = perf_counter() - started
         self.last_metrics["result_count"] = len(rows)
         return rows
 
-    def _enrich_display_fields(self, rows: list[ScreeningResult]) -> list[ScreeningResult]:
+    def enrich_display_fields(self, rows: list[ScreeningResult]) -> list[ScreeningResult]:
         """Fill every visible result column from one date-scoped PostgreSQL query."""
         if not rows: return rows
         o, m, ot, mt, market_expr, _ = self._common_parts()
