@@ -1,0 +1,118 @@
+name: Stock OpenDART automatic repair
+
+on:
+  workflow_run:
+    workflows: ["Stock menu 5 OpenDART financial backfill"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-opendart-automatic-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: write
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 50
+          persist-credentials: false
+      - name: Create failure issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          url=$(gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "OpenDART 재무수집 오류: run $RUN_ID" \
+            --body "실패 시점에만 Codex 자동 분석·수정·재개를 시작합니다. 완료 자료와 체크포인트는 보존합니다. 실행 로그: $RUN_URL")
+          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+      - name: Download failed run logs
+        id: failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          mkdir failed-run-logs
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/logs" > failed-run.zip
+          unzip -q failed-run.zip -d failed-run-logs
+          signature=$({ grep -Rho '\[ERROR\].*' failed-run-logs || true; } | tail -1 | sha256sum | cut -c1-12)
+          [[ -n "$signature" ]] || signature="$RUN_ID"
+          attempts=$(git log -50 --format=%s | grep -F -c "fix(opendart): auto-recover $signature" || true)
+          if (( attempts >= 2 )); then
+            echo "동일 오류 자동 수정 2회 제한에 도달했습니다: $signature" >&2
+            exit 78
+          fi
+          echo "signature=$signature" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install repair validation dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-cloud-worker.txt
+      - name: Run Codex for bounded OpenDART repair
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/stock-opendart-failure.md
+          output-file: codex-output.md
+          permission-profile: ":workspace"
+          allow-bots: true
+      - name: Remove diagnostic inputs before validation
+        if: always()
+        run: rm -rf failed-run.zip failed-run-logs codex-output.md
+      - name: Validate bounded repair
+        run: python scripts/validate_opendart_repair.py
+      - name: Commit and push verified repair
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNATURE: ${{ steps.failure.outputs.signature }}
+        run: |
+          git config user.name "stock-opendart-repair[bot]"
+          git config user.email "stock-opendart-repair[bot]@users.noreply.github.com"
+          git add -- requirements-cloud-worker.txt scripts/opendart_financial_backfill.py \
+            src/krx_research/financial_backfill tests/financial_backfill
+          git commit -m "fix(opendart): auto-recover $SIGNATURE"
+          gh auth setup-git
+          git push origin HEAD:main
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Resume from saved checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run stock-opendart-financial.yml --ref main
+      - name: Report automatic recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.issue.outputs.number }}
+          COMMIT: ${{ steps.push.outputs.commit }}
+          DIAGNOSIS: ${{ steps.codex.outputs.final-message }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+            --body "Codex가 제한된 OpenDART 범위의 수정과 검증을 완료했습니다. 커밋: $COMMIT. 저장된 체크포인트부터 다시 실행했습니다.\n\n$DIAGNOSIS"
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY"
+      - name: Report unresolved automatic repair
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.issue.outputs.number }}
+          REPAIR_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -n "$ISSUE" ]]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" \
+              --body "자동 수정 또는 검증을 안전하게 완료하지 못해 재실행하지 않았습니다. 완료 자료와 체크포인트는 보존되어 있습니다. 사용자 확인이 필요한 복구 실행: $REPAIR_URL"
+          fi

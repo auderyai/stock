@@ -28,6 +28,10 @@ SECRET_PATTERNS = (
 )
 
 
+def _allowed(path: str) -> bool:
+    return path in ALLOWED_FILES or path.startswith(ALLOWED_PREFIXES)
+
+
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args, cwd=ROOT, text=True, encoding="utf-8", errors="replace",
@@ -40,16 +44,20 @@ def _changed_files() -> list[str]:
     return sorted({line[3:].replace("\\", "/") for line in lines if len(line) > 3})
 
 
-def _allowed(path: str) -> bool:
-    return path in ALLOWED_FILES or path.startswith(ALLOWED_PREFIXES)
-
-
-def validate_scope(paths: list[str]) -> None:
+def validate_scope(
+    paths: list[str],
+    *,
+    allowed_files: set[str] = ALLOWED_FILES,
+    allowed_prefixes: tuple[str, ...] = ALLOWED_PREFIXES,
+) -> None:
     if not paths:
         raise RuntimeError("Codex가 수정한 파일이 없습니다.")
     if len(paths) > 16:
         raise RuntimeError(f"자동 수정 파일이 너무 많습니다: {len(paths)}")
-    forbidden = [path for path in paths if not _allowed(path)]
+    forbidden = [
+        path for path in paths
+        if path not in allowed_files and not path.startswith(allowed_prefixes)
+    ]
     if forbidden:
         raise RuntimeError("허용되지 않은 자동 수정: " + ", ".join(forbidden))
     symlinks = [path for path in paths if (ROOT / path).is_symlink()]

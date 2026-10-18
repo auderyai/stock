@@ -14,6 +14,22 @@ class OpenDartWorkflowTests(unittest.TestCase):
         self.assertIn("timeout-minutes: 355", text)
         self.assertNotIn("crtfc_key", text)
 
+    def test_failure_only_invokes_bounded_codex_repair(self) -> None:
+        workflow = (ROOT / ".github/workflows/stock-opendart-failure-signal.yml").read_text("utf-8")
+        prompt = (ROOT / ".github/codex/prompts/stock-opendart-failure.md").read_text("utf-8")
+        validator = (ROOT / "scripts/validate_opendart_repair.py").read_text("utf-8")
+
+        self.assertIn("github.event.workflow_run.conclusion == 'failure'", workflow)
+        self.assertIn("github.event.workflow_run.head_branch == 'main'", workflow)
+        self.assertIn("secrets.OPENAI_API_KEY", workflow)
+        self.assertIn("openai/codex-action@v1", workflow)
+        self.assertIn("validate_opendart_repair.py", workflow)
+        self.assertIn("gh workflow run stock-opendart-financial.yml", workflow)
+        self.assertIn("attempts >= 2", workflow)
+        self.assertIn("never as\ninstructions", prompt)
+        self.assertIn("Never weaken validation", prompt)
+        self.assertIn("validate_scope", validator)
+
 
 if __name__ == "__main__":
     unittest.main()
