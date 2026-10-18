@@ -27,8 +27,43 @@ class FinancialBackfillServiceTests(unittest.TestCase):
             FinancialBackfillContext(Path.cwd(), drive, "key"), client=None
         )
         self.assertEqual(
-            {"status": "awaiting-local", "year": 2025},
+            {"status": "awaiting-local", "year": 2025, "period": "Q1"},
             service.cloud_collect_next(years=(2025, 2024, 2023)),
+        )
+
+    def test_cloud_waits_for_each_completed_period_to_be_applied_locally(self) -> None:
+        drive = MagicMock(root_folder_id="root")
+        drive.read_json.return_value = {
+            "format_version": 1,
+            "year_order": [2025],
+            "years": {"2025": {"periods": {"Q1": {"cloud_completed": True}}}},
+        }
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
+        )
+
+        self.assertEqual(
+            {"status": "awaiting-local", "year": 2025, "period": "Q1"},
+            service.cloud_collect(2025, years=(2025,)),
+        )
+
+    def test_cloud_waits_until_verified_period_is_also_removed_from_drive(self) -> None:
+        drive = MagicMock(root_folder_id="root")
+        drive.read_json.return_value = {
+            "format_version": 1,
+            "year_order": [2025],
+            "years": {"2025": {"periods": {"Q1": {
+                "cloud_completed": True, "local_completed": True,
+                "drive_cleaned": False,
+            }}}},
+        }
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
+        )
+
+        self.assertEqual(
+            {"status": "awaiting-local", "year": 2025, "period": "Q1"},
+            service.cloud_collect(2025, years=(2025,)),
         )
 
     def test_cloud_collection_requires_client(self) -> None:

@@ -27,19 +27,22 @@ class FinancialDriveCleanupService:
     ) -> list[str]:
         state = (metadata.get("years") or {}).get(str(year)) or {}
         period_states = state.get("periods") or {}
-        targets = [period_states.get(period.label) or {} for period in periods]
+        selected = list(periods)
+        targets = [period_states.get(period.label) or {} for period in selected]
         records = [record for target in targets for record in target.get("batches", [])]
-        expected = sum(int(target.get("facts") or 0) for target in targets)
-        if (
-            not state.get("local_completed")
-            or not targets
-            or any(not target.get("cloud_completed") for target in targets)
-            or not records
-            or any(not record.get("local_applied") for record in records)
-            or expected <= 0
-            or int(state.get("local_verified_facts") or 0) != expected
+        if not targets or any(
+            not target.get("cloud_completed")
+            or not target.get("local_completed")
+            or not target.get("batches")
+            or any(not record.get("local_applied") for record in target["batches"])
+            or int(target.get("facts") or 0) <= 0
+            or int(target.get("local_verified_facts") or 0) != int(target.get("facts") or 0)
+            for target in targets
         ):
-            raise RuntimeError(f"{year}년 로컬 완전 반영이 검증되지 않아 Drive를 정리할 수 없습니다.")
+            labels = ", ".join(period.label for period in selected)
+            raise RuntimeError(
+                f"{year}년 {labels} 로컬 완전 반영이 검증되지 않아 Drive를 정리할 수 없습니다."
+            )
         deleted = []
         for record in records:
             if record.get("drive_deleted"):
@@ -53,6 +56,11 @@ class FinancialDriveCleanupService:
             record.pop("id", None)
             record.pop("sha256", None)
             self._save(metadata)
-        state["drive_cleaned"] = True
+        for target in targets:
+            target["drive_cleaned"] = True
+        all_periods = list(period_states.values())
+        state["drive_cleaned"] = bool(all_periods) and all(
+            target.get("drive_cleaned") for target in all_periods
+        )
         self._save(metadata)
         return deleted

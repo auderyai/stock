@@ -11,11 +11,11 @@ def metadata(*, applied: bool = True, verified: int = 3) -> dict:
     return {
         "years": {
             "2025": {
-                "local_completed": True,
-                "local_verified_facts": verified,
                 "periods": {
                     "Q1": {
                         "cloud_completed": True,
+                        "local_completed": True,
+                        "local_verified_facts": verified,
                         "facts": 3,
                         "batches": [{
                             "id": "file-1", "name": "batch.enc", "sha256": "hash",
@@ -43,6 +43,7 @@ class FinancialDriveCleanupTests(unittest.TestCase):
         self.assertTrue(record["drive_deleted"])
         self.assertNotIn("id", record)
         self.assertNotIn("sha256", record)
+        self.assertTrue(document["years"]["2025"]["periods"]["Q1"]["drive_cleaned"])
         self.assertTrue(document["years"]["2025"]["drive_cleaned"])
         self.assertEqual(2, save.call_count)
 
@@ -62,8 +63,8 @@ class FinancialDriveCleanupTests(unittest.TestCase):
             "id": "file-2", "name": "batch-2.enc", "sha256": "hash-2",
             "local_applied": True,
         })
-        document["years"]["2025"].update(local_verified_facts=4)
-        document["years"]["2025"]["periods"]["Q1"]["facts"] = 4
+        q1 = document["years"]["2025"]["periods"]["Q1"]
+        q1.update(facts=4, local_verified_facts=4)
         drive, save = MagicMock(), MagicMock()
         drive.delete.side_effect = [None, RuntimeError("delete failed")]
 

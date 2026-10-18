@@ -24,7 +24,7 @@ $principal = New-ScheduledTaskPrincipal `
 
 Register-ScheduledTask `
     -TaskName 'AuderyAI OpenDART Financial Local Sync' `
-    -Description 'Every 10 minutes, apply only a complete verified financial year from Drive to local PostgreSQL.' `
+    -Description 'Every 10 minutes, apply one complete verified financial period from Drive to local PostgreSQL.' `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `

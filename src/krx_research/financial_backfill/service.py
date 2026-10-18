@@ -68,6 +68,13 @@ class FinancialBackfillService:
         )
         year_state = (metadata["years"]).setdefault(str(year), {"periods": {}})
         targets = self._target_periods(year_state, year)
+        pending_local = FinancialBackfillPolicy.pending_local_period(year_state, targets)
+        if pending_local is not None:
+            return {
+                "status": "awaiting-local",
+                "year": year,
+                "period": pending_local.label,
+            }
         period = FinancialBackfillPolicy.next_period(year_state, targets)
         if period is None:
             return {
@@ -95,6 +102,13 @@ class FinancialBackfillService:
                 )
             ):
                 return {"status": "awaiting-local", "year": years[index - 1]}
+            pending_local = FinancialBackfillPolicy.pending_local_period(state, targets)
+            if pending_local is not None:
+                return {
+                    "status": "awaiting-local",
+                    "year": year,
+                    "period": pending_local.label,
+                }
             if FinancialBackfillPolicy.next_period(state, targets) is not None:
                 return self.cloud_collect(
                     year,
@@ -113,14 +127,29 @@ class FinancialBackfillService:
         year_state = (metadata.get("years") or {}).get(str(year)) or {}
         periods = year_state.get("periods") or {}
         targets = self._stored_targets(year_state)
-        if any(
-            not periods.get(period.label, {}).get("cloud_completed")
-            for period in targets
-        ):
-            required = ", ".join(period.label for period in targets)
-            raise RuntimeError(
-                f"{year}년 클라우드 수집 대상({required})이 아직 완료되지 않았습니다."
-            )
+        active = next(
+            (
+                period for period in targets
+                if periods.get(period.label, {}).get("batches")
+                and not periods.get(period.label, {}).get("cloud_completed")
+            ),
+            None,
+        )
+        if active is not None:
+            return {"status": "awaiting-cloud", "year": year, "period": active.label}
+        period = next(
+            (
+                candidate for candidate in targets
+                if periods.get(candidate.label, {}).get("cloud_completed")
+                and (
+                    not periods.get(candidate.label, {}).get("local_completed")
+                    or not periods.get(candidate.label, {}).get("drive_cleaned")
+                )
+            ),
+            None,
+        )
+        if period is None:
+            return {"status": "awaiting-cloud", "year": year}
         applied: list[str] = []
         with self._connection() as connection, tempfile.TemporaryDirectory(
             prefix="stock-financial-local-"
@@ -128,39 +157,46 @@ class FinancialBackfillService:
             repository = FinancialRepository(connection)
             repository.initialize_schema()
             work = Path(temporary_name)
-            for period in targets:
-                state = periods[period.label]
-                for record in state.get("batches", []):
-                    if record.get("local_applied"):
-                        continue
-                    encrypted = self._context.drive.download(
-                        str(record["id"]), work / str(record["name"])
-                    )
-                    if self._sha256(encrypted) != record.get("sha256"):
-                        raise RuntimeError(f"Drive 다운로드 해시 불일치: {record['name']}")
-                    archive = work / f"{record['batch_id']}.tar.gz"
-                    ArchiveCipher.decrypt(encrypted, archive, self._context.archive_key)
-                    result = repository.apply_archive(archive)
-                    record["local_applied"] = True
-                    applied.append(str(result["batch_id"]))
-                    self._write_metadata(metadata)
-            expected_facts = sum(
-                int(periods[period.label].get("facts") or 0)
-                for period in targets
-            )
-            actual_facts = repository.year_fact_count(year)
+            state = periods[period.label]
+            for record in state.get("batches", []):
+                if record.get("local_applied"):
+                    continue
+                encrypted = self._context.drive.download(
+                    str(record["id"]), work / str(record["name"])
+                )
+                if self._sha256(encrypted) != record.get("sha256"):
+                    raise RuntimeError(f"Drive 다운로드 해시 불일치: {record['name']}")
+                archive = work / f"{record['batch_id']}.tar.gz"
+                ArchiveCipher.decrypt(encrypted, archive, self._context.archive_key)
+                result = repository.apply_archive(archive)
+                record["local_applied"] = True
+                applied.append(str(result["batch_id"]))
+                self._write_metadata(metadata)
+            expected_facts = int(state.get("facts") or 0)
+            actual_facts = repository.period_fact_count(year, period)
             if not expected_facts or actual_facts != expected_facts:
                 raise RuntimeError(
-                    f"{year}년 로컬 재무자료 검증 실패: "
+                    f"{year}년 {period.label} 로컬 재무자료 검증 실패: "
                     f"기대={expected_facts}, 실제={actual_facts}"
                 )
-        year_state.update(local_completed=True, local_verified_facts=actual_facts)
+        state.update(local_completed=True, local_verified_facts=actual_facts)
         self._write_metadata(metadata)
         deleted = FinancialDriveCleanupService(
             self._context.drive, self._write_metadata
-        ).cleanup(metadata, year, targets)
+        ).cleanup(metadata, year, (period,))
+        year_state["local_completed"] = all(
+            periods.get(candidate.label, {}).get("local_completed") for candidate in targets
+        )
+        year_state["drive_cleaned"] = all(
+            periods.get(candidate.label, {}).get("drive_cleaned") for candidate in targets
+        )
+        year_state["local_verified_facts"] = sum(
+            int(periods.get(candidate.label, {}).get("local_verified_facts") or 0)
+            for candidate in targets
+        )
+        self._write_metadata(metadata)
         return {
-            "status": "complete", "year": year,
+            "status": "complete-period", "year": year, "period": period.label,
             "applied_batches": applied, "deleted_drive_files": deleted,
         }
 
@@ -175,15 +211,19 @@ class FinancialBackfillService:
             state = (metadata.get("years") or {}).get(str(year), {})
             if state.get("local_completed") and not state.get("drive_cleaned"):
                 return self.sync_local(year, years=years)
-            if state.get("local_completed"):
-                continue
             periods = state.get("periods") or {}
             targets = self._stored_targets(state)
-            if all(
+            if any(
                 periods.get(period.label, {}).get("cloud_completed")
+                and (
+                    not periods.get(period.label, {}).get("local_completed")
+                    or not periods.get(period.label, {}).get("drive_cleaned")
+                )
                 for period in targets
             ):
                 return self.sync_local(year, years=years)
+            if state.get("local_completed"):
+                continue
             return {"status": "awaiting-cloud", "year": year}
         return {"status": "up-to-date", "years": list(years)}
 

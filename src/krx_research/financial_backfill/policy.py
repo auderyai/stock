@@ -53,6 +53,24 @@ class FinancialBackfillPolicy:
             None,
         )
 
+    @classmethod
+    def pending_local_period(
+        cls,
+        year_state: dict[str, Any],
+        targets: tuple[FinancialPeriod, ...],
+    ) -> FinancialPeriod | None:
+        """Keep cloud collection and local acknowledgement strictly alternating."""
+        periods = year_state.get("periods") or {}
+        return next(
+            (
+                period
+                for period in targets
+                if periods.get(period.label, {}).get("cloud_completed")
+                and not periods.get(period.label, {}).get("drive_cleaned")
+            ),
+            None,
+        )
+
     @staticmethod
     def extend_year_order(stored: list[int], requested: list[int]) -> list[int]:
         if stored == requested:

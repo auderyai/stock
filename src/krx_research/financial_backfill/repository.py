@@ -70,6 +70,14 @@ class FinancialRepository:
         ).fetchone()
         return int(row["count"] if isinstance(row, dict) else row[0])
 
+    def period_fact_count(self, year: int, period: FinancialPeriod) -> int:
+        row = self._connection.execute(
+            "SELECT count(*) AS count FROM financial.statement_facts "
+            "WHERE fiscal_year=%s AND fiscal_period=%s",
+            (year, period.label),
+        ).fetchone()
+        return int(row["count"] if isinstance(row, dict) else row[0])
+
     def batch_counts(self) -> dict[str, int]:
         row = self._connection.execute(
             "SELECT (SELECT count(*) FROM financial.company_master) AS companies, "
