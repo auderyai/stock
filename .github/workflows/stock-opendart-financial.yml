@@ -2,8 +2,9 @@ name: Stock menu 5 OpenDART financial backfill
 
 on:
   schedule:
-    # One report period per day; the next year waits for local verification.
-    - cron: "23 15 * * *"
+    # Keep collecting the next validated period. Concurrency prevents overlap;
+    # the next year still waits for verified local PostgreSQL application.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       year:

@@ -8,4 +8,6 @@ if not exist "%SOURCE%" (
 )
 copy /Y "%SOURCE%" "%TARGET%" >nul
 if not errorlevel 1 echo [OK] Windows startup sync registered: %TARGET%
+if errorlevel 1 exit /b %ERRORLEVEL%
+call "%~dp0REGISTER_OPENDART_FINANCIAL_SYNC_TASK.cmd"
 exit /b %ERRORLEVEL%
