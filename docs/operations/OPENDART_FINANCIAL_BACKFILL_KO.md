@@ -7,13 +7,13 @@
 1. 2026년 10월 현재 제출이 끝난 Q1 → 반기를 먼저 수집한다.
 2. 각 100개 회사 배치를 DuckDB로 검증하고 임시 PostgreSQL에 저장한다.
 3. 검증된 배치만 암호화하여 Google Drive에 체크포인트로 저장한다.
-4. 2026년 가용 보고서가 완료되면 로컬 PC에 반영한다.
-5. 로컬 PostgreSQL의 기대·실제 행 수가 정확히 일치한 뒤 반영된 암호화 배치를 Drive에서 삭제한다.
-6. 로컬 검증과 Drive 정리가 완료된 뒤 2025 → 2024 → 2023년을 진행한다.
+4. 클라우드는 로컬 PC 상태와 관계없이 2026년 가용분 → 2025 → 2024 → 2023년을 연속 수집한다.
+5. 로컬 PC가 켜지면 완료된 분기를 PostgreSQL에 멱등 반영한다.
+6. 로컬 PostgreSQL의 기대·실제 행 수가 정확히 일치한 배치만 명시적 확인 후 Drive에서 삭제할 수 있다.
 7. 이후 2026년 Q3 등 새 기간이 제출되면 기존 체크포인트 뒤에 추가한다.
 
-GitHub Actions는 하루에 다음 미완료 보고서 하나를 실행한다. PC가 꺼져 있어도
-클라우드 수집은 계속되지만 다음 연도는 직전 연도의 로컬 완료 확인을 기다린다.
+GitHub Actions는 30분마다 다음 미완료 보고서를 확인한다. 동시 실행은 막되 진행 중 실행
+뒤에 다음 실행이 대기하므로, PC가 꺼져 있거나 로컬 반영 전이어도 3개년 수집은 계속된다.
 
 ## 비밀값
 
@@ -28,7 +28,8 @@ Drive에 해당 연도의 현재 수집 대상 보고서가 모두 완료된 후
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2026,2025,2024,2023 sync-local --year 2026
+  --years 2026,2025,2024,2023 sync-local --year 2026 `
+  --cleanup-confirm DELETE_VERIFIED_FINANCIAL_ARCHIVES
 ```
 
 상태만 확인할 때는 다음 명령을 사용한다.
@@ -44,13 +45,15 @@ $env:PYTHONPATH='src'
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2026,2025,2024,2023 sync-ready-local
+  --years 2026,2025,2024,2023 sync-ready-local `
+  --cleanup-confirm DELETE_VERIFIED_FINANCIAL_ARCHIVES
 ```
 
 `tools\setup\INSTALL_OPENDART_FINANCIAL_SYNC_ON_LOGON.cmd`를 한 번 실행하면 현재 사용자의
 Windows 로그인 때 위 검사를 숨김 실행한다. 실행 기록은
 `logs\financial_backfill\startup_sync.log`에 남는다. 클라우드의 4개 보고 기간이 모두
-완료되지 않은 연도는 내려받거나 DB에 쓰지 않는다.
+완료되지 않은 연도는 내려받거나 DB에 쓰지 않는다. 삭제 확인 문자열은 설치된 자동화에
+명시되어 있으며, 로컬 멱등 재검증이 끝나기 전에는 삭제 단계에 도달하지 않는다.
 
 로컬 반영이 끝나도 기대 행 수와 실제 행 수가 다르거나 일부 배치가 미반영이면 Drive
 파일을 삭제하지 않는다. 완전 반영이 확인된 파일만 하나씩 삭제하고 매번 체크포인트를

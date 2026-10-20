@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from krx_research.cloud_sync.credentials import DriveCredentials
-from krx_research.cloud_sync.drive import GoogleDriveClient
+from krx_research.cloud_sync.drive import GoogleDriveClient, GoogleDriveTransientError
 from krx_research.financial_backfill.client import OpenDartClient, OpenDartTransientError
 from krx_research.financial_backfill.service import (
     DEFAULT_YEARS,
@@ -45,9 +45,11 @@ def parser() -> argparse.ArgumentParser:
     cloud.add_argument("--max-batches", type=int, default=0, help="0은 해당 분기 전체")
     local = commands.add_parser("sync-local", help="완료 연도를 로컬 PostgreSQL에 반영")
     local.add_argument("--year", type=int, required=True)
-    commands.add_parser(
+    local.add_argument("--cleanup-confirm", choices=("DELETE_VERIFIED_FINANCIAL_ARCHIVES",))
+    ready = commands.add_parser(
         "sync-ready-local", help="Drive에서 완료된 다음 연도만 로컬 PostgreSQL에 반영"
     )
+    ready.add_argument("--cleanup-confirm", choices=("DELETE_VERIFIED_FINANCIAL_ARCHIVES",))
     commands.add_parser("status", help="Drive 체크포인트 상태 확인")
     return result
 
@@ -87,15 +89,26 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 service = FinancialBackfillService(context, client=None)
                 result = (
-                    service.sync_local(args.year, years=args.years)
+                    service.sync_local(
+                        args.year,
+                        years=args.years,
+                        cleanup_confirmed=(
+                            args.cleanup_confirm == "DELETE_VERIFIED_FINANCIAL_ARCHIVES"
+                        ),
+                    )
                     if args.command == "sync-local"
-                    else service.sync_ready_local(years=args.years)
+                    else service.sync_ready_local(
+                        years=args.years,
+                        cleanup_confirmed=(
+                            args.cleanup_confirm == "DELETE_VERIFIED_FINANCIAL_ARCHIVES"
+                        ),
+                    )
                     if args.command == "sync-ready-local"
                     else service.status(args.years)
                 )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except OpenDartTransientError as exc:
+    except (GoogleDriveTransientError, OpenDartTransientError) as exc:
         print(f"[TRANSIENT] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 75
     except Exception as exc:

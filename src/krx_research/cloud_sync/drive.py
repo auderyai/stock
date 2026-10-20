@@ -134,7 +134,8 @@ class GoogleDriveClient:
         if not upload_url:
             raise GoogleDriveError("Drive 업로드 세션 주소가 없습니다.")
         with source.open("rb") as stream:
-            uploaded = self._session.put(
+            uploaded = self._request(
+                "put",
                 upload_url,
                 headers={
                     "Content-Type": "application/octet-stream",
@@ -204,6 +205,12 @@ class GoogleDriveClient:
             },
             timeout=30,
         )
+        if not response.ok:
+            reason = self._oauth_error_code(response)
+            suffix = f" ({reason})" if reason else ""
+            raise GoogleDriveError(
+                f"Google OAuth 토큰 갱신 실패: HTTP {response.status_code}{suffix}"
+            )
         token = str(self._json(response, "Google OAuth 토큰 갱신").get("access_token") or "")
         if not token:
             raise GoogleDriveError("Google OAuth 접근 토큰이 없습니다.")
@@ -212,6 +219,9 @@ class GoogleDriveClient:
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Retry exactly once for expired tokens and transient network failures."""
         for attempt in range(2):
+            body = kwargs.get("data")
+            if attempt and hasattr(body, "seek"):
+                body.seek(0)
             try:
                 response = getattr(self._session, method)(url, **kwargs)
             except (requests.ConnectionError, requests.Timeout) as exc:
@@ -245,3 +255,12 @@ class GoogleDriveClient:
     def _require_success(response: requests.Response, operation: str) -> None:
         if not response.ok:
             raise GoogleDriveError(f"{operation} 실패: HTTP {response.status_code}")
+
+    @staticmethod
+    def _oauth_error_code(response: requests.Response) -> str:
+        """Return only Google's non-secret OAuth error identifier for diagnostics."""
+        try:
+            code = str(response.json().get("error", "")).strip()
+        except (AttributeError, TypeError, ValueError):
+            return ""
+        return code if code.replace("_", "").isalnum() else ""

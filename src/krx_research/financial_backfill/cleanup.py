@@ -24,7 +24,11 @@ class FinancialDriveCleanupService:
         metadata: dict[str, Any],
         year: int,
         periods: Iterable[FinancialPeriod],
+        *,
+        confirmed: bool = False,
     ) -> list[str]:
+        if not confirmed:
+            raise RuntimeError("Drive 재무자료 삭제에는 명시적 확인이 필요합니다.")
         state = (metadata.get("years") or {}).get(str(year)) or {}
         period_states = state.get("periods") or {}
         selected = list(periods)

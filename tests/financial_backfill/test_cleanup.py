@@ -34,7 +34,7 @@ class FinancialDriveCleanupTests(unittest.TestCase):
         document = metadata()
 
         deleted = FinancialDriveCleanupService(drive, save).cleanup(
-            document, 2025, (FinancialPeriod.Q1,)
+            document, 2025, (FinancialPeriod.Q1,), confirmed=True
         )
 
         self.assertEqual(["batch.enc"], deleted)
@@ -52,7 +52,7 @@ class FinancialDriveCleanupTests(unittest.TestCase):
             drive = MagicMock()
             with self.assertRaisesRegex(RuntimeError, "완전 반영"):
                 FinancialDriveCleanupService(drive, MagicMock()).cleanup(
-                    document, 2025, (FinancialPeriod.Q1,)
+                    document, 2025, (FinancialPeriod.Q1,), confirmed=True
                 )
             drive.delete.assert_not_called()
 
@@ -70,12 +70,20 @@ class FinancialDriveCleanupTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "delete failed"):
             FinancialDriveCleanupService(drive, save).cleanup(
-                document, 2025, (FinancialPeriod.Q1,)
+                document, 2025, (FinancialPeriod.Q1,), confirmed=True
             )
 
         self.assertTrue(records[0]["drive_deleted"])
         self.assertFalse(records[1].get("drive_deleted", False))
         save.assert_called_once_with(document)
+
+    def test_rejects_cleanup_without_explicit_confirmation(self) -> None:
+        drive = MagicMock()
+        with self.assertRaisesRegex(RuntimeError, "명시적 확인"):
+            FinancialDriveCleanupService(drive, MagicMock()).cleanup(
+                metadata(), 2025, (FinancialPeriod.Q1,)
+            )
+        drive.delete.assert_not_called()
 
 
 if __name__ == "__main__":

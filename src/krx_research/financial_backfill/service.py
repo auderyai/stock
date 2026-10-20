@@ -7,19 +7,14 @@ import subprocess
 import tempfile
 from typing import Any
 
-import psycopg
-from psycopg.rows import dict_row
-
-from krx_research.cloud_sync.archive import ArchiveCipher, DatabaseArchiveService
+from krx_research.cloud_sync.archive import ArchiveCipher
 from krx_research.cloud_sync.drive import GoogleDriveClient
-from krx_research.cloud_sync.models import FINANCIAL_TABLES
-from krx_research.data_engine.config import database_conninfo
 
 from .client import OpenDartClient
 from .cleanup import FinancialDriveCleanupService
 from .models import FinancialBatch, FinancialPeriod
 from .policy import FinancialBackfillPolicy
-from .repository import FinancialRepository
+from .repository import open_financial_repository
 from .staging import DuckDbFinancialStagingRepository
 
 
@@ -63,18 +58,8 @@ class FinancialBackfillService:
         if year not in ordered_years or ordered_years != sorted(ordered_years, reverse=True):
             raise ValueError("사업연도는 최신 연도부터 내림차순으로 지정해야 합니다.")
         metadata = self._metadata(ordered_years)
-        FinancialBackfillPolicy.require_previous_local_completion(
-            ordered_years, metadata, year
-        )
         year_state = (metadata["years"]).setdefault(str(year), {"periods": {}})
         targets = self._target_periods(year_state, year)
-        pending_local = FinancialBackfillPolicy.pending_local_period(year_state, targets)
-        if pending_local is not None:
-            return {
-                "status": "awaiting-local",
-                "year": year,
-                "period": pending_local.label,
-            }
         period = FinancialBackfillPolicy.next_period(year_state, targets)
         if period is None:
             return {
@@ -93,22 +78,9 @@ class FinancialBackfillService:
         max_batches: int = 0,
     ) -> dict[str, Any]:
         metadata = self._metadata(list(years))
-        for index, year in enumerate(years):
+        for year in years:
             state = (metadata.get("years") or {}).get(str(year), {})
             targets = self._target_periods(state, year)
-            if index and not (
-                (metadata.get("years") or {}).get(str(years[index - 1]), {}).get(
-                    "local_completed"
-                )
-            ):
-                return {"status": "awaiting-local", "year": years[index - 1]}
-            pending_local = FinancialBackfillPolicy.pending_local_period(state, targets)
-            if pending_local is not None:
-                return {
-                    "status": "awaiting-local",
-                    "year": year,
-                    "period": pending_local.label,
-                }
             if FinancialBackfillPolicy.next_period(state, targets) is not None:
                 return self.cloud_collect(
                     year,
@@ -116,12 +88,14 @@ class FinancialBackfillService:
                     batch_size=batch_size,
                     max_batches=max_batches,
                 )
-            if not state.get("local_completed"):
-                return {"status": "awaiting-local", "year": year}
         return {"status": "complete", "years": list(years)}
 
     def sync_local(
-        self, year: int, *, years: tuple[int, ...] = DEFAULT_YEARS
+        self,
+        year: int,
+        *,
+        years: tuple[int, ...] = DEFAULT_YEARS,
+        cleanup_confirmed: bool = False,
     ) -> dict[str, Any]:
         metadata = self._metadata(list(years))
         year_state = (metadata.get("years") or {}).get(str(year)) or {}
@@ -151,10 +125,9 @@ class FinancialBackfillService:
         if period is None:
             return {"status": "awaiting-cloud", "year": year}
         applied: list[str] = []
-        with self._connection() as connection, tempfile.TemporaryDirectory(
+        with open_financial_repository() as repository, tempfile.TemporaryDirectory(
             prefix="stock-financial-local-"
         ) as temporary_name:
-            repository = FinancialRepository(connection)
             repository.initialize_schema()
             work = Path(temporary_name)
             state = periods[period.label]
@@ -181,9 +154,13 @@ class FinancialBackfillService:
                 )
         state.update(local_completed=True, local_verified_facts=actual_facts)
         self._write_metadata(metadata)
-        deleted = FinancialDriveCleanupService(
-            self._context.drive, self._write_metadata
-        ).cleanup(metadata, year, (period,))
+        deleted = (
+            FinancialDriveCleanupService(
+                self._context.drive, self._write_metadata
+            ).cleanup(metadata, year, (period,), confirmed=True)
+            if cleanup_confirmed
+            else []
+        )
         year_state["local_completed"] = all(
             periods.get(candidate.label, {}).get("local_completed") for candidate in targets
         )
@@ -201,7 +178,10 @@ class FinancialBackfillService:
         }
 
     def sync_ready_local(
-        self, *, years: tuple[int, ...] = DEFAULT_YEARS
+        self,
+        *,
+        years: tuple[int, ...] = DEFAULT_YEARS,
+        cleanup_confirmed: bool = False,
     ) -> dict[str, Any]:
         """Apply the first cloud-complete year, otherwise leave local data untouched."""
         metadata = self._read_metadata(list(years))
@@ -210,7 +190,9 @@ class FinancialBackfillService:
         for year in years:
             state = (metadata.get("years") or {}).get(str(year), {})
             if state.get("local_completed") and not state.get("drive_cleaned"):
-                return self.sync_local(year, years=years)
+                return self.sync_local(
+                    year, years=years, cleanup_confirmed=cleanup_confirmed
+                )
             periods = state.get("periods") or {}
             targets = self._stored_targets(state)
             if any(
@@ -221,7 +203,9 @@ class FinancialBackfillService:
                 )
                 for period in targets
             ):
-                return self.sync_local(year, years=years)
+                return self.sync_local(
+                    year, years=years, cleanup_confirmed=cleanup_confirmed
+                )
             if state.get("local_completed"):
                 continue
             return {"status": "awaiting-cloud", "year": year}
@@ -259,10 +243,9 @@ class FinancialBackfillService:
         offset = int(state.get("next_offset") or 0)
         processed = 0
         folder = self._period_folder(year, period)
-        with self._connection() as connection, tempfile.TemporaryDirectory(
+        with open_financial_repository() as repository, tempfile.TemporaryDirectory(
             prefix="stock-financial-cloud-"
         ) as temporary_name:
-            repository = FinancialRepository(connection)
             repository.initialize_schema()
             work = Path(temporary_name)
             while offset < len(companies) and (not max_batches or processed < max_batches):
@@ -279,13 +262,10 @@ class FinancialBackfillService:
                     FinancialBatch(tuple(selected), facts), year=year, period=period
                 )
                 batch_id = f"financial-{year}-{period.label}-{offset:06d}"
-                archive = DatabaseArchiveService(
-                    connection, FINANCIAL_TABLES
-                ).export_delta(
+                archive = repository.export_delta(
                     work / f"{batch_id}.tar.gz",
                     target_date=period.period_end(year),
                     git_commit=self._git_commit(),
-                    kind="financial-delta",
                     batch_id=batch_id,
                 )
                 if sum(int(item["rows"]) for item in archive.manifest["tables"]) <= 0:
@@ -389,10 +369,6 @@ class FinancialBackfillService:
         self._context.drive.write_json(
             metadata, name=METADATA_NAME, parent_id=self._context.drive.root_folder_id
         )
-
-    @staticmethod
-    def _connection():
-        return psycopg.connect(database_conninfo(), row_factory=dict_row)
 
     def _git_commit(self) -> str:
         completed = subprocess.run(

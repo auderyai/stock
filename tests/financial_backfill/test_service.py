@@ -2,6 +2,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import MagicMock
 
+from krx_research.financial_backfill.models import FinancialPeriod
 from krx_research.financial_backfill.service import (
     FinancialBackfillContext,
     FinancialBackfillService,
@@ -9,7 +10,7 @@ from krx_research.financial_backfill.service import (
 
 
 class FinancialBackfillServiceTests(unittest.TestCase):
-    def test_next_year_waits_for_current_year_local_verification(self) -> None:
+    def test_next_year_collection_does_not_wait_for_local_verification(self) -> None:
         drive = MagicMock(root_folder_id="root")
         drive.read_json.return_value = {
             "format_version": 1,
@@ -24,14 +25,18 @@ class FinancialBackfillServiceTests(unittest.TestCase):
             },
         }
         service = FinancialBackfillService(
-            FinancialBackfillContext(Path.cwd(), drive, "key"), client=None
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
         )
+        service.cloud_collect = MagicMock(return_value={"status": "partial", "year": 2024})
         self.assertEqual(
-            {"status": "awaiting-local", "year": 2025, "period": "Q1"},
+            {"status": "partial", "year": 2024},
             service.cloud_collect_next(years=(2025, 2024, 2023)),
         )
+        service.cloud_collect.assert_called_once_with(
+            2024, years=(2025, 2024, 2023), batch_size=100, max_batches=0
+        )
 
-    def test_cloud_waits_for_each_completed_period_to_be_applied_locally(self) -> None:
+    def test_cloud_advances_after_completed_period_without_local_sync(self) -> None:
         drive = MagicMock(root_folder_id="root")
         drive.read_json.return_value = {
             "format_version": 1,
@@ -41,13 +46,20 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         service = FinancialBackfillService(
             FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
         )
-
-        self.assertEqual(
-            {"status": "awaiting-local", "year": 2025, "period": "Q1"},
-            service.cloud_collect(2025, years=(2025,)),
+        service._collect_period = MagicMock(
+            return_value={"status": "complete", "year": 2025, "period": "HALF"}
         )
 
-    def test_cloud_waits_until_verified_period_is_also_removed_from_drive(self) -> None:
+        self.assertEqual(
+            {"status": "complete", "year": 2025, "period": "HALF"},
+            service.cloud_collect(2025, years=(2025,)),
+        )
+        self.assertIs(
+            service._collect_period.call_args.args[2],
+            FinancialPeriod.HALF,
+        )
+
+    def test_drive_retention_does_not_block_cloud_collection(self) -> None:
         drive = MagicMock(root_folder_id="root")
         drive.read_json.return_value = {
             "format_version": 1,
@@ -60,9 +72,12 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         service = FinancialBackfillService(
             FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
         )
+        service._collect_period = MagicMock(
+            return_value={"status": "complete", "year": 2025, "period": "HALF"}
+        )
 
         self.assertEqual(
-            {"status": "awaiting-local", "year": 2025, "period": "Q1"},
+            {"status": "complete", "year": 2025, "period": "HALF"},
             service.cloud_collect(2025, years=(2025,)),
         )
 
@@ -110,7 +125,9 @@ class FinancialBackfillServiceTests(unittest.TestCase):
             {"status": "complete", "year": 2025},
             service.sync_ready_local(years=(2025, 2024, 2023)),
         )
-        service.sync_local.assert_called_once_with(2025, years=(2025, 2024, 2023))
+        service.sync_local.assert_called_once_with(
+            2025, years=(2025, 2024, 2023), cleanup_confirmed=False
+        )
 
     def test_existing_history_checkpoint_is_extended_with_current_year(self) -> None:
         drive = MagicMock(root_folder_id="root")
@@ -145,7 +162,9 @@ class FinancialBackfillServiceTests(unittest.TestCase):
             {"status": "complete", "year": 2025},
             service.sync_ready_local(years=(2025,)),
         )
-        service.sync_local.assert_called_once_with(2025, years=(2025,))
+        service.sync_local.assert_called_once_with(
+            2025, years=(2025,), cleanup_confirmed=False
+        )
 
 
 if __name__ == "__main__":

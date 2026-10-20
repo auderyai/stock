@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import contextmanager
 import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from krx_research.cloud_sync.archive import DeltaArchiveApplier
+import psycopg
+from psycopg.rows import dict_row
+
+from krx_research.cloud_sync.archive import DatabaseArchiveService, DeltaArchiveApplier
 from krx_research.cloud_sync.models import FINANCIAL_TABLES
 from krx_research.database.postgresql_schema import POSTGRESQL_FINANCIAL_SCHEMA
+from krx_research.data_engine.config import database_conninfo
 
 from .models import FinancialBatch, FinancialPeriod
 
@@ -62,6 +67,16 @@ class FinancialRepository:
         return DeltaArchiveApplier(
             self._connection, FINANCIAL_TABLES, expected_kind="financial-delta"
         ).apply(archive)
+
+    def export_delta(self, path: Path, *, target_date, git_commit: str, batch_id: str):
+        """Export the current staging batch without leaking a DB connection upstream."""
+        return DatabaseArchiveService(self._connection, FINANCIAL_TABLES).export_delta(
+            path,
+            target_date=target_date,
+            git_commit=git_commit,
+            kind="financial-delta",
+            batch_id=batch_id,
+        )
 
     def year_fact_count(self, year: int) -> int:
         row = self._connection.execute(
@@ -144,3 +159,11 @@ class FinancialRepository:
                     retrieved_at, json.dumps(fact["raw_json"], ensure_ascii=False),
                 ),
             )
+
+
+@contextmanager
+def open_financial_repository():
+    """Own the PostgreSQL resource lifecycle at the repository boundary."""
+
+    with psycopg.connect(database_conninfo(), row_factory=dict_row) as connection:
+        yield FinancialRepository(connection)

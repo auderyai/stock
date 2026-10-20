@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-set "ROOT=C:\stock"
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 set "PY=%ROOT%\.venv_krx_menu\Scripts\python.exe"
 set "SCRIPT=%ROOT%\scripts\opendart_financial_backfill.py"
 set "LOG_DIR=%ROOT%\logs\financial_backfill"
@@ -13,7 +13,7 @@ if not exist "%PY%" (
 )
 set "PYTHONPATH=%ROOT%\src"
 set "PYTHONUTF8=1"
-"%PY%" "%SCRIPT%" --years 2026,2025,2024,2023 sync-ready-local >>"%LOG%" 2>&1
+"%PY%" "%SCRIPT%" --years 2026,2025,2024,2023 sync-ready-local --cleanup-confirm DELETE_VERIFIED_FINANCIAL_ARCHIVES >>"%LOG%" 2>&1
 set "RC=!ERRORLEVEL!"
 echo [%date% %time%] END rc=!RC!>>"%LOG%"
 exit /b !RC!

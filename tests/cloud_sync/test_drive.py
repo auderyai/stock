@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 import unittest
 from unittest.mock import MagicMock
 
@@ -61,6 +62,30 @@ class GoogleDriveClientTests(unittest.TestCase):
         )
 
         client.delete("missing")
+
+    def test_request_retries_server_error_and_rewinds_upload_stream(self) -> None:
+        session = MagicMock()
+        token = MagicMock(ok=True, status_code=200)
+        token.json.return_value = {"access_token": "token"}
+        session.post.return_value = token
+        failed = MagicMock(status_code=500)
+        accepted = MagicMock(ok=True, status_code=200)
+        payloads = []
+        responses = iter((failed, accepted))
+        session.put.side_effect = lambda *_args, **kwargs: (
+            payloads.append(kwargs["data"].read()), next(responses)
+        )[1]
+        client = GoogleDriveClient(
+            client_id="id", client_secret="secret", refresh_token="refresh",
+            root_folder_id="folder", session=session,
+        )
+        stream = BytesIO(b"verified archive")
+
+        response = client._request("put", "https://upload.test", data=stream)
+
+        self.assertIs(response, accepted)
+        self.assertEqual(2, session.put.call_count)
+        self.assertEqual([b"verified archive", b"verified archive"], payloads)
 
 
 if __name__ == "__main__":

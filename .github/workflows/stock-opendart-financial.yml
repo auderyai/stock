@@ -3,7 +3,7 @@ name: Stock menu 5 OpenDART financial backfill
 on:
   schedule:
     # Keep collecting the next validated period. Concurrency prevents overlap;
-    # the next year still waits for verified local PostgreSQL application.
+    # cloud collection advances independently of the local PostgreSQL sync.
     - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
@@ -53,8 +53,8 @@ jobs:
       PYTHONUTF8: "1"
       TZ: Asia/Seoul
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -67,4 +67,12 @@ jobs:
           if [[ -n "${{ inputs.year }}" ]]; then
             args+=(--year "${{ inputs.year }}")
           fi
+          set +e
           python scripts/opendart_financial_backfill.py "${args[@]}"
+          rc=$?
+          set -e
+          if (( rc == 75 )); then
+            echo "일시적인 공급원 오류입니다. 저장된 체크포인트부터 다음 일정에서 재개합니다."
+            exit 0
+          fi
+          exit "$rc"

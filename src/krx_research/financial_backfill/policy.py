@@ -53,24 +53,6 @@ class FinancialBackfillPolicy:
             None,
         )
 
-    @classmethod
-    def pending_local_period(
-        cls,
-        year_state: dict[str, Any],
-        targets: tuple[FinancialPeriod, ...],
-    ) -> FinancialPeriod | None:
-        """Keep cloud collection and local acknowledgement strictly alternating."""
-        periods = year_state.get("periods") or {}
-        return next(
-            (
-                period
-                for period in targets
-                if periods.get(period.label, {}).get("cloud_completed")
-                and not periods.get(period.label, {}).get("drive_cleaned")
-            ),
-            None,
-        )
-
     @staticmethod
     def extend_year_order(stored: list[int], requested: list[int]) -> list[int]:
         if stored == requested:
@@ -78,15 +60,3 @@ class FinancialBackfillPolicy:
         if len(stored) <= len(requested) and requested[-len(stored):] == stored:
             return requested
         raise RuntimeError("기존 재무 백필 사업연도 순서와 요청이 다릅니다.")
-
-    @staticmethod
-    def require_previous_local_completion(
-        years: list[int], metadata: dict[str, Any], requested_year: int
-    ) -> None:
-        index = years.index(requested_year)
-        if index and not (
-            (metadata.get("years") or {}).get(str(years[index - 1]), {}).get("local_completed")
-        ):
-            raise RuntimeError(
-                f"{years[index - 1]}년 로컬 검증 완료 후 {requested_year}년을 시작할 수 있습니다."
-            )
