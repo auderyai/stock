@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(errors="replace")
     args = build_parser().parse_args(argv)
     today = dt.date.today()
     end = args.end or today

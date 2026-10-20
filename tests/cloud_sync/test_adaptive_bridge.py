@@ -72,6 +72,31 @@ class _UniverseSession:
         pass
 
 
+class _IndexMembershipSession:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def post(self, url, **kwargs):
+        if url.endswith("/oauth2/token"):
+            return _JsonResponse(200, {"access_token": "token"})
+        self.requests.append((url, kwargs))
+        request = kwargs["data"].decode("utf-8")
+        if '"shcode": ""' in request:
+            return _JsonResponse(200, {
+                "rsp_cd": "00000",
+                "t1516OutBlock": {"shcode": "000002"},
+                "t1516OutBlock1": [{"shcode": "000001"}, {"shcode": "000002"}],
+            })
+        return _JsonResponse(200, {
+            "rsp_cd": "00000",
+            "t1516OutBlock": {"shcode": ""},
+            "t1516OutBlock1": [{"shcode": "000003"}],
+        })
+
+    def close(self) -> None:
+        pass
+
+
 class AdaptiveBridgeTests(unittest.TestCase):
     def test_cloud_mode_does_not_attempt_xing_fallback(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
@@ -124,6 +149,24 @@ class AdaptiveBridgeTests(unittest.TestCase):
             bridge.connect(); result = bridge.raw_tr("t8436", {"gubun": "0"})
             self.assertEqual("005930", result["rows"][0]["shcode"])
             self.assertTrue(session.request[0].endswith("/stock/etc"))
+
+    def test_index_membership_uses_openapi_and_body_cursor(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            root = Path(name); (root / "src" / "krx_research").mkdir(parents=True)
+            session = _IndexMembershipSession()
+            bridge = AdaptiveRawTrBridge(
+                root, session=session, credential_loader=lambda _root: ("key", "secret"),
+                fallback_allowed=False, sleep_fn=lambda _seconds: None,
+                clock_fn=lambda: 1.0, progress=lambda _message: None,
+            )
+
+            bridge.connect()
+            result = bridge.raw_tr("t1516", {"upcode": "101", "gubun": "1", "shcode": ""})
+
+            self.assertEqual(["000001", "000002", "000003"], [row["shcode"] for row in result["rows"]])
+            self.assertEqual(2, len(session.requests))
+            self.assertTrue(all(item[0].endswith("/indtp/market-data") for item in session.requests))
+            self.assertIn('"shcode": "000002"', session.requests[1][1]["data"].decode("utf-8"))
 
 
 if __name__ == "__main__":

@@ -28,6 +28,11 @@ class AdaptiveRawTrBridge:
         "t8436": ("/stock/etc", "t8436InBlock", "t8436OutBlock"),
         "t1702": ("/stock/frgr-itt", "t1702InBlock", "t1702OutBlock1"),
         "t8451": ("/stock/chart", "t8451InBlock", "t8451OutBlock1"),
+        "t1516": ("/indtp/market-data", "t1516InBlock", "t1516OutBlock1"),
+    }
+    _BODY_CURSORS = {
+        "t8451": ("t8451OutBlock", "cts_date"),
+        "t1516": ("t1516OutBlock", "shcode"),
     }
     _BASE, _MIN_INTERVAL = "https://openapi.ls-sec.co.kr:8080", 1.05
 
@@ -53,7 +58,8 @@ class AdaptiveRawTrBridge:
     def connect(self) -> None:
         try:
             self._authorize()
-            self._enabled = True; self._emit("[LS OPENAPI] t8436/t1702/t8451 연결 완료 (1 TR/sec)")
+            self._enabled = True
+            self._emit(f"[LS OPENAPI] {'/'.join(self._API)} 연결 완료 (TR별 제한 준수)")
         except Exception as exc:
             detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
             self._enabled = False
@@ -96,12 +102,14 @@ class AdaptiveRawTrBridge:
             page = payload.get(out_block, [])
             if not isinstance(page, list): raise TypeError(f"{tr}: {out_block}가 list가 아닙니다.")
             rows.extend(row for row in page if isinstance(row, dict))
-            if tr != "t8451": break
-            cursor = str((payload.get("t8451OutBlock") or {}).get("cts_date") or "").strip()
+            cursor_spec = self._BODY_CURSORS.get(tr)
+            if cursor_spec is None: break
+            header_block, cursor_field = cursor_spec
+            cursor = str((payload.get(header_block) or {}).get(cursor_field) or "").strip()
             if not cursor or cursor in visited or not page: break
-            visited.add(cursor); values["cts_date"] = cursor; continuation = "Y"
+            visited.add(cursor); values[cursor_field] = cursor; continuation = "Y"
             key = str(getattr(response, "headers", {}).get("tr_cont_key") or "")
-        else: raise RuntimeError("t8451 연속조회 200페이지 제한을 초과했습니다.")
+        else: raise RuntimeError(f"{tr} 연속조회 200페이지 제한을 초과했습니다.")
         return {"rows": rows, "provider": "LS_OPENAPI", "raw": payload}
 
     def _request(self, path: str, tr: str, block: str, values: dict[str, Any], continuation: str, key: str):
