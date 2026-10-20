@@ -5,11 +5,35 @@ import unittest
 from unittest.mock import patch
 
 from krx_research.qt.services.assistant_service import AssistantService
+from krx_research.qt.services.codex_subscription_backend import CodexSubscriptionBackend
 from krx_research.qt.repositories.assistant_repository import ReadOnlyDatabaseTool
 from krx_research.qt.services.assistant_workspace import OneOffWorkspace, ReusableCodeLibrary
 
 
 class AssistantBoundaryTests(unittest.TestCase):
+    def test_codex_planner_ignores_interactive_config_and_uses_low_reasoning(self):
+        with TemporaryDirectory() as directory, patch(
+            "krx_research.qt.services.codex_subscription_backend.find_codex_executable",
+            return_value="codex",
+        ), patch(
+            "krx_research.qt.services.codex_subscription_backend.subprocess.run"
+        ) as run:
+            backend = CodexSubscriptionBackend(Path(directory))
+
+            def complete(command, **_kwargs):
+                output = Path(command[command.index("--output-last-message") + 1])
+                output.write_text(
+                    '{"action":"finish","arguments":"{}","answer":"완료","citations":[]}',
+                    encoding="utf-8",
+                )
+                return type("Completed", (), {"returncode": 0})()
+
+            run.side_effect = complete
+            self.assertEqual(backend.step("확인")["answer"], "완료")
+            command = run.call_args.args[0]
+            self.assertIn("--ignore-user-config", command)
+            self.assertEqual(command[command.index("-c") + 1], 'model_reasoning_effort="low"')
+
     def test_assistant_parses_text_and_citations_without_persisting_api_state(self):
         class Response:
             ok = True

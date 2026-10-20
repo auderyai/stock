@@ -45,7 +45,8 @@ class CodexSubscriptionBackend:
         with TemporaryDirectory(dir=self.work) as directory:
             output = Path(directory) / "response.json"
             command = [
-                executable, "exec", "--ephemeral", "--ignore-rules", "--skip-git-repo-check",
+                executable, "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules",
+                "-c", 'model_reasoning_effort="low"', "--skip-git-repo-check",
                 "--sandbox", "read-only", "--color", "never", "-C", directory,
                 "--output-schema", str(self.schema), "--output-last-message", str(output), "-",
             ]
