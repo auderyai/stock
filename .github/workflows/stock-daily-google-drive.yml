@@ -2,10 +2,8 @@ name: Stock daily DB update to Google Drive
 
 on:
   schedule:
-    # GitHub cron is UTC. The second trigger covers a delayed/dropped first event;
-    # checkpointed stages make the duplicate invocation idempotent.
-    - cron: "37 11 * * 1-5"
-    - cron: "17 12 * * 1-5"
+    # GitHub cron is UTC: 12:00 UTC = 21:00 Asia/Seoul.
+    - cron: "0 12 * * 1-5"
   workflow_dispatch:
     inputs:
       target_date:

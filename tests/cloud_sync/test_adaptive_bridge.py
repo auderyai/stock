@@ -56,8 +56,9 @@ class _ExpiredTokenSession:
 
 
 class _UniverseSession:
-    def __init__(self) -> None:
+    def __init__(self, rows=None) -> None:
         self.request = None
+        self.rows = rows if rows is not None else [{"shcode": "005930", "hname": "삼성전자"}]
 
     def post(self, url, **kwargs):
         if url.endswith("/oauth2/token"):
@@ -65,7 +66,7 @@ class _UniverseSession:
         self.request = (url, kwargs)
         return _JsonResponse(200, {
             "rsp_cd": "00000",
-            "t8436OutBlock": [{"shcode": "005930", "hname": "삼성전자"}],
+            "t8436OutBlock": self.rows,
         })
 
     def close(self) -> None:
@@ -149,6 +150,19 @@ class AdaptiveBridgeTests(unittest.TestCase):
             bridge.connect(); result = bridge.raw_tr("t8436", {"gubun": "0"})
             self.assertEqual("005930", result["rows"][0]["shcode"])
             self.assertTrue(session.request[0].endswith("/stock/etc"))
+
+    def test_empty_cloud_stock_universe_is_provider_failure(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            root = Path(name); (root / "src" / "krx_research").mkdir(parents=True)
+            bridge = AdaptiveRawTrBridge(
+                root, session=_UniverseSession([]), credential_loader=lambda _root: ("key", "secret"),
+                fallback_allowed=False, sleep_fn=lambda _seconds: None,
+                clock_fn=lambda: 1.0, progress=lambda _message: None,
+            )
+
+            bridge.connect()
+            with self.assertRaises(DataProviderUnavailableError):
+                bridge.raw_tr("t8436", {"gubun": "0"})
 
     def test_index_membership_uses_openapi_and_body_cursor(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:

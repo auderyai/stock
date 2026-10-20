@@ -34,6 +34,7 @@ class AdaptiveRawTrBridge:
         "t8451": ("t8451OutBlock", "cts_date"),
         "t1516": ("t1516OutBlock", "shcode"),
     }
+    _NONEMPTY_ROWS = frozenset({"t8436"})
     _BASE, _MIN_INTERVAL = "https://openapi.ls-sec.co.kr:8080", 1.05
 
     def __init__(self, project_root: Path, *, progress: Progress | None = None,
@@ -83,13 +84,21 @@ class AdaptiveRawTrBridge:
     def raw_tr(self, tr: str, values: dict[str, str]) -> dict[str, Any]:
         code = str(tr).strip().lower()
         if self._enabled and code in self._API:
-            try: return self._openapi(code, values)
+            try:
+                response = self._openapi(code, values)
+                self._validate_response(code, response)
+                return response
             except Exception as exc: self._emit(f"[LS OPENAPI FALLBACK] {code}: {type(exc).__name__}: {exc}")
         if not self._fallback_allowed:
             if code not in self._API:
                 raise DataProviderUnavailableError(f"LS OpenAPI 미지원 TR입니다: {code}")
             raise DataProviderUnavailableError(f"LS OpenAPI 요청에 실패했습니다: {code}")
         return self._xing().raw_tr(tr, values)
+
+    @classmethod
+    def _validate_response(cls, tr: str, response: dict[str, Any]) -> None:
+        if tr in cls._NONEMPTY_ROWS and not response.get("rows"):
+            raise DataProviderUnavailableError(f"{tr}: 필수 응답 행이 없습니다.")
 
     def _openapi(self, tr: str, values: dict[str, str]) -> dict[str, Any]:
         path, in_block, out_block = self._API[tr]; values = {k: str(v) for k, v in values.items()}
