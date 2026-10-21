@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import pandas as pd
-import psycopg
-from psycopg.rows import dict_row
 
 from krx_research_nextgen.infrastructure.db_settings import PostgreSQLSettings
+from krx_research_nextgen.infrastructure.postgresql import open_connection
 
 
 class AuxiliaryRepository:
@@ -14,8 +13,8 @@ class AuxiliaryRepository:
         self._settings = settings or PostgreSQLSettings.from_c_stock_env()
 
     def _connect(self):
-        return psycopg.connect(
-            **self._settings.connect_kwargs(), row_factory=dict_row, autocommit=True,
+        return open_connection(
+            self._settings,
             application_name="krx_nextgen_auxiliary",
         )
 

@@ -37,9 +37,10 @@ class ResultTable(QTableView):
         return self._model.frame
 
     def set_frame(self, frame: pd.DataFrame, *, header_labels: dict[str, str] | None = None) -> None:
-        self.setSortingEnabled(False)
         self._model.set_frame(frame, header_labels=header_labels)
-        self.setSortingEnabled(True)
+        default = self._model.apply_default_sort()
+        if default is not None:
+            self.horizontalHeader().setSortIndicator(*default)
         self.resizeColumnsToContents()
 
     def current_ticker(self) -> str | None:
@@ -50,12 +51,12 @@ class ResultTable(QTableView):
         for name in self._identity_columns:
             value = row.get(name)
             if value is not None and str(value).strip() and str(value).lower() != "nan":
-                text = str(value).strip().replace(".0", "")
+                text = str(value).strip().removesuffix(".0")
                 return text.zfill(self._identity_width) if self._identity_width else text
         return None
 
     def select_ticker(self, ticker: str) -> bool:
-        target = str(ticker).strip().replace(".0", "")
+        target = str(ticker).strip().removesuffix(".0")
         if self._identity_width:
             target = target.zfill(self._identity_width)
         if self.frame.empty:

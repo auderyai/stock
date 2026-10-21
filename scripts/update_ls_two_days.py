@@ -1,15 +1,20 @@
 from __future__ import annotations
-import argparse,datetime as dt,json,os,sys,time
+import argparse,datetime as dt,os,sys,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 from krx_research.collectors.ls_index_api import LSIndexClient
 from krx_research.data_engine.config import DataEngineSettings
-from krx_research.data_engine.postgresql import BaseDataRepository
+from krx_research.data_engine.ls_two_day_repository import LSTwoDayRepository
+from krx_research.database.administrative_repository import AdministrativeRepository
 from ls_two_day_source import DDL,collect
 from ls_two_day_rate import RateLimitedClient
 from diagnose_ls_two_days import write_report
 DAYS=(dt.date(2026,9,28),dt.date(2026,9,29))
+
+def write_diagnostic(settings):
+    with AdministrativeRepository(settings,application_name='ls_two_days_diagnostic') as repo:
+        return write_report(repo)
 
 def plans(prices,master):
     master=master.copy()
@@ -32,25 +37,19 @@ def main():
     p.add_argument('--refresh',action='store_true',help='Refetch only these two days, including completed rows')
     args=p.parse_args()
     began=time.monotonic()
-    with BaseDataRepository(DataEngineSettings.from_environment(),application_name='ls_two_days') as repo:
-        with repo.conn.transaction():repo.conn.execute(DDL)
-        if not repo.conn.execute('SELECT pg_try_advisory_lock(76340928029) AS acquired').fetchone()['acquired']:
+    settings=DataEngineSettings.from_environment()
+    with LSTwoDayRepository(settings,DDL) as repo:
+        if not repo.acquire_lock():
             raise RuntimeError('Another two-day investor collector is running. Do not start a duplicate.')
-        write_report(repo)
-        prices=repo.get_market_ohlcv(DAYS[0],DAYS[-1])
-        todo=plans(prices,repo.get_security_master_frame())
+        write_diagnostic(settings)
+        prices=repo.prices(DAYS[0],DAYS[-1])
+        todo=plans(prices,repo.security_master())
         if args.ticker:
             code=args.ticker.strip().upper()
             if code not in todo:raise ValueError('Selected stock has no saved candle for these dates.')
             todo={code:todo[code]}
         # Verify four raw source matrices rather than trusting a stale checkpoint.
-        done={}
-        for row in repo.conn.execute("SELECT stock_code,trade_date FROM market_core.ls_investor_t1702_raw WHERE exchange_code='K' AND trade_date IN (%s,%s) GROUP BY stock_code,trade_date HAVING count(DISTINCT (metric_code,side_code))=4",DAYS).fetchall():
-            done.setdefault(row['stock_code'],set()).add(row['trade_date'])
-        with repo.conn.transaction():
-            for code,days in done.items():
-                for day in days:
-                    repo.conn.execute("INSERT INTO market_core.ls_investor_t1702_checkpoint(stock_code,trade_date,exchange_code) VALUES (%s,%s,'K') ON CONFLICT DO NOTHING",(code,day))
+        done=repo.completed(DAYS)
         skipped=0
         if not args.refresh:
             for code in list(todo):
@@ -68,23 +67,19 @@ def main():
             for pos,(code,days) in enumerate(todo.items(),1):
                 print(f'[{pos}/{len(todo)}] {code}: request two-day range',flush=True)
                 try:
-                    keys={(r['trade_date'],r['metric_code'],r['side_code']) for r in repo.conn.execute("SELECT trade_date,metric_code,side_code FROM market_core.ls_investor_t1702_raw WHERE stock_code=%s AND exchange_code='K' AND trade_date IN (%s,%s)",(code,*DAYS)).fetchall()} if not args.refresh else set()
+                    keys=repo.existing_keys(code,DAYS) if not args.refresh else set()
                     found,complete=collect(client,code,days,keys)
-                    with repo.conn.transaction():
-                        for (day,metric,side),fields in found.items():
-                            repo.conn.execute("INSERT INTO market_core.ls_investor_t1702_raw (stock_code,trade_date,metric_code,side_code,exchange_code,source_fields) VALUES (%s,%s,%s,%s,'K',%s::jsonb) ON CONFLICT(stock_code,trade_date,metric_code,side_code,exchange_code) DO UPDATE SET source_fields=EXCLUDED.source_fields,collected_at=now()",(code,day,metric,side,json.dumps(fields,ensure_ascii=False)))
-                        for day in complete:
-                            repo.conn.execute("INSERT INTO market_core.ls_investor_t1702_checkpoint(stock_code,trade_date,exchange_code) VALUES (%s,%s,'K') ON CONFLICT DO NOTHING",(code,day))
+                    repo.save(code,found,complete)
                     saved+=len(complete);missing+=len(days)-len(complete)
                     if len(days)!=len(complete):print(f'{code}: missing {len(days)-len(complete)} days; NOT marked complete',flush=True)
                 except Exception as error:
                     print(f'ERROR {code}: {type(error).__name__}: {error}. Saved rows preserved; rerun resumes.',flush=True)
-                    write_report(repo)
+                    write_diagnostic(settings)
                     return 2
                 elapsed=time.monotonic()-began
                 eta=elapsed/pos*(len(todo)-pos)
                 print(f'[{pos}/{len(todo)}] saved {saved} stock-days / missing {missing} / ETA {eta/60:.1f} min',flush=True)
-        write_report(repo)
+        write_diagnostic(settings)
         print(f'DONE: saved {saved}, skipped {skipped}, missing {missing}. Refresh the display.')
         return 2 if missing else 0
 if __name__=='__main__':raise SystemExit(main())

@@ -8,15 +8,12 @@ import sys
 import time
 from pathlib import Path
 
-from psycopg import sql
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from krx_research.collectors.index_membership import INDEX_GAINER_DEFINITIONS, IndexMembership
 from krx_research.data_engine.config import DataEngineSettings, load_environment
 from krx_research.data_engine.index_membership_store import PostgreSQLIndexMembershipStore
-from krx_research.data_engine.postgresql import BaseDataRepository
 
 
 SOURCE = "KRX:MDCSTAT00601_AUTH"
@@ -29,16 +26,7 @@ class KRXIndexMembershipBackfill:
         self.store = PostgreSQLIndexMembershipStore(settings)
 
     def _trade_dates(self, start: dt.date, end: dt.date) -> list[dt.date]:
-        with BaseDataRepository(self.settings, application_name="membership_backfill_dates") as repo:
-            table = sql.SQL("{}.{}").format(
-                sql.Identifier(self.settings.ohlcv_schema), sql.Identifier(self.settings.ohlcv_table),
-            )
-            rows = repo.conn.execute(
-                sql.SQL("SELECT DISTINCT trade_date::date AS d FROM {} "
-                        "WHERE trade_date::date BETWEEN %s::date AND %s::date ORDER BY d").format(table),
-                (start, end),
-            ).fetchall()
-        return [row["d"] for row in rows]
+        return self.store.trade_dates(start, end)
 
     def _fetch(self, screen_type: str, day: dt.date) -> IndexMembership:
         definition = INDEX_GAINER_DEFINITIONS[screen_type]

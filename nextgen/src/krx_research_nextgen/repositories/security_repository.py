@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 
 from krx_research_nextgen.infrastructure.db_settings import PostgreSQLSettings
+from krx_research_nextgen.infrastructure.postgresql import open_connection
 from krx_research_nextgen.models.security import SecurityRecord
 
 
@@ -15,10 +14,8 @@ class SecurityRepository:
 
     def __init__(self, settings: PostgreSQLSettings | None = None) -> None:
         self._settings = settings or PostgreSQLSettings.from_c_stock_env()
-        self._conn = psycopg.connect(
-            **self._settings.connect_kwargs(),
-            row_factory=dict_row,
-            autocommit=True,
+        self._conn = open_connection(
+            self._settings,
             application_name="krx_nextgen_finplot_stage3_security",
         )
         self._schema, self._table, self._columns = self._resolve_master()

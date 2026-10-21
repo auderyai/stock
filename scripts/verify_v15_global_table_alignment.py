@@ -5,9 +5,10 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 QT = ROOT / 'src' / 'krx_research' / 'qt'
+PRESENTATION = ROOT / 'src' / 'krx_research' / 'presentation'
 errors: list[str] = []
 
-policy_path = QT / 'presentation' / 'table_policy.py'
+policy_path = PRESENTATION / 'table_policy.py'
 common_path = QT / 'common.py'
 market_path = QT / 'windows' / 'market_index_window.py'
 result_table_path = QT / 'widgets' / 'result_table.py'
@@ -19,8 +20,8 @@ result_table = result_table_path.read_text(encoding='utf-8')
 
 checks = {
     'global numeric-text detector': '_is_numeric_like' in policy and '_NUMERIC_TEXT' in policy,
-    'numeric cells right aligned': 'Qt.AlignRight | Qt.AlignVCenter' in policy,
-    'text cells left aligned': 'Qt.AlignLeft | Qt.AlignVCenter' in policy,
+    'numeric cells right aligned': 'return "right"' in policy,
+    'text cells left aligned': 'return "left"' in policy,
     'stock/index codes centered': '"index_code"' in policy and 'if column in self.ticker_columns' in policy,
     'headers use common alignment policy': 'self._policy.header_alignment' in common,
     'market-index market not forced centered': 'center_columns=("market", "index_code")' not in market,

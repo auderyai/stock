@@ -154,7 +154,8 @@ class GitApplication:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Stock Git workflow")
-    parser.add_argument("--root", default=os.environ.get("STOCK_ROOT", r"C:\stock"))
+    default_root = os.environ.get("STOCK_ROOT", str(Path(__file__).resolve().parents[1]))
+    parser.add_argument("--root", default=default_root)
     sub = parser.add_subparsers(dest="command", required=True)
 
     init = sub.add_parser("init")

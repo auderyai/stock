@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QListWidget
 
-from krx_research.ui.data import SCREEN_TITLES
+from krx_research.policies.workstation_options import SCREEN_TITLES
 
 
 class ScreenSelector(QListWidget):

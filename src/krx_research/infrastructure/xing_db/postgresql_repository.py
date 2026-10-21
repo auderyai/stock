@@ -98,7 +98,9 @@ class PostgreSQLXingMenuRepository:
     def __init__(self, settings: DataEngineSettings | None = None,
                  *, application_name: str = "xing_db_menu_v40") -> None:
         self._repo = BaseDataRepository(
-            settings or DataEngineSettings.from_environment(), application_name=application_name
+            settings or DataEngineSettings.from_environment(),
+            application_name=application_name,
+            read_only=False,
         )
 
     @property

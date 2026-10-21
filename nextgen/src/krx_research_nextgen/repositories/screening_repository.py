@@ -5,13 +5,12 @@ from datetime import date as calendar_date
 from time import perf_counter
 
 import pandas as pd
-import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 
 from krx_research_nextgen.infrastructure.db_settings import PostgreSQLSettings
+from krx_research_nextgen.infrastructure.postgresql import open_connection
 from krx_research_nextgen.models.screening import (
-    ScreeningKind,
+    BOLLINGER_UNIVERSE,
     ScreeningQuery,
     ScreeningResult,
 )
@@ -50,10 +49,8 @@ class ScreeningRepository:
 
     def __init__(self, settings: PostgreSQLSettings | None = None) -> None:
         self._settings = settings or PostgreSQLSettings.from_c_stock_env()
-        self._conn = psycopg.connect(
-            **self._settings.connect_kwargs(),
-            row_factory=dict_row,
-            autocommit=True,
+        self._conn = open_connection(
+            self._settings,
             application_name="krx_nextgen_stage4_sql_perf",
         )
         self._ohlcv = self._resolve_ohlcv()
@@ -149,12 +146,26 @@ class ScreeningRepository:
             raise RuntimeError("OHLCV table has no trade date.")
         return str(row["d"])
 
-    def bollinger_input(self, as_of_date: str | None, *, lookback: int = 260) -> pd.DataFrame:
-        """Return one bounded, complete KOSPI/KOSDAQ close history for breadth calculation."""
+    def bollinger_input(
+        self,
+        as_of_date: str | None,
+        *,
+        universe: str = BOLLINGER_UNIVERSE,
+        lookback: int = 260,
+    ) -> pd.DataFrame:
+        """Return bounded close history for the selected screening universe."""
         dates = self._recent_trade_dates(lookback, as_of_date)
         if len(dates) < 21:
             raise RuntimeError("볼린저밴드 계산에 필요한 거래일이 21일 미만입니다.")
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
+        _, universe_value = self._market_filter(universe)
+        universe_where, universe_params = self._universe_sql(
+            m,
+            universe_value,
+            stock_alias="o",
+            stock_column=o["stock_code"],
+            as_of_date=dates[0],
+        )
         amount = (
             sql.SQL("COALESCE(o.{x}::double precision,0)").format(x=sql.Identifier(o["trading_value"]))
             if "trading_value" in o else
@@ -169,14 +180,45 @@ class ScreeningRepository:
             FROM {ot} o JOIN {mt} m ON m.{mcode}=o.{code}
             WHERE o.{date}::date BETWEEN %s::date AND %s::date
               AND upper({market}) IN ('KOSPI','KOSDAQ') AND {spac}
+              {universe_where}
             ORDER BY o.{code}, o.{date}
         """).format(
             code=sql.Identifier(o["stock_code"]), date=sql.Identifier(o["trade_date"]),
             close=sql.Identifier(o["close"]), amount=amount,
             name=sql.Identifier(m["stock_name"]), market=market_expr,
             ot=ot, mt=mt, mcode=sql.Identifier(m["stock_code"]), spac=spac_filter,
+            universe_where=universe_where,
         )
-        return pd.DataFrame(self._conn.execute(query, (dates[-1], dates[0])).fetchall())
+        params = [dates[-1], dates[0], *universe_params]
+        return pd.DataFrame(self._conn.execute(query, params).fetchall())
+
+    def ema_alignment_input(self, start: str, latest: str, universe: str) -> pd.DataFrame:
+        """Read warm-up and evaluation closes; EMA rules remain in the service strategy."""
+        dates = self._recent_trade_dates(252, start)
+        if len(dates) < 15:
+            raise RuntimeError("EMA15 계산에 필요한 거래일이 15일 미만입니다.")
+        o, m, ot, mt, market_expr, spac_filter = self._common_parts()
+        _, universe_value = self._market_filter(universe)
+        universe_where, universe_params = self._universe_sql(
+            m, universe_value, stock_alias="o", stock_column=o["stock_code"], as_of_date=latest
+        )
+        query = sql.SQL("""
+            SELECT o.{code}::text stock_code, m.{name}::text stock_name,
+                   {market} market, o.{date}::date trade_date,
+                   o.{close}::double precision close
+            FROM {ot} o JOIN {mt} m ON m.{mcode}=o.{code}
+            WHERE o.{date} BETWEEN %s::varchar AND %s::varchar
+              AND o.{close}::double precision>0 AND {spac} {universe_where}
+            ORDER BY o.{code}, o.{date}
+        """).format(
+            code=sql.Identifier(o["stock_code"]), name=sql.Identifier(m["stock_name"]),
+            market=market_expr, date=sql.Identifier(o["trade_date"]),
+            close=sql.Identifier(o["close"]), ot=ot, mt=mt,
+            mcode=sql.Identifier(m["stock_code"]), spac=spac_filter,
+            universe_where=universe_where,
+        )
+        self.last_metrics.update({"ema_history_start": dates[-1], "latest_date": latest, "universe": universe})
+        return pd.DataFrame(self._execute_timed(query, [dates[-1], latest, *universe_params]))
 
     def earliest_trade_date(self) -> str:
         c = self._ohlcv.columns
@@ -401,39 +443,6 @@ class ScreeningRepository:
                 })
 
         return results
-
-    def run(self, query: ScreeningQuery) -> list[ScreeningResult]:
-        if not 1 <= query.limit <= 500:
-            raise ValueError("screening limit must be 1..500")
-
-        self.last_metrics = {}
-        started = perf_counter()
-        if query.kind == ScreeningKind.EMA_SIMILARITY:
-            rows = self._ema_similarity(query)
-        elif query.kind == ScreeningKind.HIGH_52W:
-            rows = self._high_52w(query)
-        elif query.kind == ScreeningKind.NEAR_HIGH_52W:
-            rows = self._near_high_52w(query)
-        elif query.kind == ScreeningKind.BOLLINGER_BREAKOUT:
-            rows = self._bollinger_breakout(query)
-        elif query.kind == ScreeningKind.DAILY_GAINERS:
-            rows = self._daily_gainers(query)
-        elif query.kind == ScreeningKind.WEEKLY_GAINERS:
-            rows = self._weekly_gainers(query)
-        elif query.kind == ScreeningKind.TURNOVER_TOP:
-            rows = self._turnover_top(query)
-        elif query.kind == ScreeningKind.WEEKLY_TURNOVER_TOP:
-            rows = self._weekly_turnover_top(query)
-        elif query.kind == ScreeningKind.EMA20_LEADING_SECTOR:
-            rows = self._ema20_leading_sector(query)
-        else:
-            raise ValueError(f"Unsupported screening kind: {query.kind}")
-        enrich_started = perf_counter()
-        rows = self.enrich_display_fields(rows)
-        self.last_metrics["display_enrichment_seconds"] = perf_counter() - enrich_started
-        self.last_metrics["repository_total_seconds"] = perf_counter() - started
-        self.last_metrics["result_count"] = len(rows)
-        return rows
 
     def enrich_display_fields(self, rows: list[ScreeningResult]) -> list[ScreeningResult]:
         """Fill every visible result column from one date-scoped PostgreSQL query."""
@@ -997,7 +1006,7 @@ class ScreeningRepository:
         self.last_metrics["sql_seconds"] = perf_counter() - started
         return rows
 
-    def _daily_gainers(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def daily_gainers(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
         dates = self._recent_trade_dates(2, query.as_of_date)
         if len(dates) < 2:
@@ -1035,7 +1044,7 @@ class ScreeningRepository:
         WHERE cur.{date} = %s::varchar
           AND {spac}
           {universe_where}
-        ORDER BY change_pct DESC NULLS LAST
+        ORDER BY change_pct DESC NULLS LAST, cur.{code}
         LIMIT %s
         """).format(
             code=sql.Identifier(o["stock_code"]),
@@ -1058,7 +1067,7 @@ class ScreeningRepository:
         })
         return self._rows_to_results(self._execute_timed(q, params))
 
-    def _weekly_turnover_top(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def weekly_turnover_top(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
         dates = self._recent_trade_dates(5, query.as_of_date)
         if len(dates) < 5:
@@ -1089,7 +1098,7 @@ class ScreeningRepository:
         FROM {ot} cur JOIN totals t ON t.stock_code=cur.{code}
         JOIN {mt} m ON m.{mcode}=cur.{code}
         WHERE cur.{date}=%s::varchar AND {spac} {universe_where}
-        ORDER BY t.trading_value DESC NULLS LAST LIMIT %s
+        ORDER BY t.trading_value DESC NULLS LAST, cur.{code} LIMIT %s
         """).format(
             code=sql.Identifier(o["stock_code"]), amount=amount, ot=ot,
             date=sql.Identifier(o["trade_date"]), name=sql.Identifier(m["stock_name"]),
@@ -1101,7 +1110,7 @@ class ScreeningRepository:
         self.last_metrics.update({"latest_date": latest, "range_start_date": start, "universe": universe})
         return self._rows_to_results(self._execute_timed(q, params))
 
-    def _near_high_52w(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def near_high_52w(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
         dates = self._recent_trade_dates(254, query.as_of_date)
         if not dates:
@@ -1127,7 +1136,7 @@ class ScreeningRepository:
             AND COALESCE(cur.{volume}::double precision,0)>0 AND {spac} {universe_where}
         ) SELECT * FROM candidates
           WHERE distance_from_high_pct BETWEEN %s AND %s
-          ORDER BY distance_from_high_pct DESC, trading_value DESC LIMIT %s
+          ORDER BY distance_from_high_pct DESC, trading_value DESC, stock_code LIMIT %s
         """).format(
             code=sql.Identifier(o["stock_code"]), high=sql.Identifier(o["high"]), ot=ot,
             date=sql.Identifier(o["trade_date"]), name=sql.Identifier(m["stock_name"]),
@@ -1138,49 +1147,7 @@ class ScreeningRepository:
         params = [start, latest, latest] + universe_params + [float(query.near_low), float(query.near_high), int(query.limit)]
         return self._rows_to_results(self._execute_timed(q, params))
 
-    def _bollinger_breakout(self, query: ScreeningQuery) -> list[ScreeningResult]:
-        o, m, ot, mt, market_expr, spac_filter = self._common_parts()
-        dates = self._recent_trade_dates(140, query.as_of_date)
-        if len(dates) < 100:
-            return []
-        latest, start = dates[0], dates[-1]
-        universe, value = self._market_filter(query.market)
-        universe_where, universe_params = self._universe_sql(
-            m, value, stock_alias="cur", stock_column=o["stock_code"], as_of_date=latest
-        )
-        q = sql.SQL("""
-        WITH weekly AS (
-          SELECT DISTINCT ON ({code}, date_trunc('week',{date}::date))
-            {code} AS stock_code, {date}::date AS trade_date, {close}::double precision AS close
-          FROM {ot} WHERE {date} BETWEEN %s::varchar AND %s::varchar
-          ORDER BY {code}, date_trunc('week',{date}::date), {date}::date DESC
-        ), ranked AS (
-          SELECT *, row_number() OVER(PARTITION BY stock_code ORDER BY trade_date DESC) rn FROM weekly
-        ), bands AS (
-          SELECT stock_code, max(close) FILTER(WHERE rn=1) AS close,
-            avg(close) FILTER(WHERE rn BETWEEN 2 AND 21) AS mid,
-            stddev_samp(close) FILTER(WHERE rn BETWEEN 2 AND 21) AS sd
-          FROM ranked GROUP BY stock_code HAVING count(*)>=21
-        )
-        SELECT cur.{code}::text AS stock_code, m.{name}::text AS stock_name,
-          {market} AS market, cur.{date}::date AS trade_date, cur.{close}::double precision AS close,
-          (b.close/(b.mid+2*b.sd)-1)*100 AS change_pct,
-          cur.{close}::double precision*cur.{volume}::double precision AS trading_value,
-          (b.mid+2*b.sd) AS high_52w, NULL::double precision AS distance_from_high_pct
-        FROM bands b JOIN {ot} cur ON cur.{code}=b.stock_code AND cur.{date}=%s::varchar
-        JOIN {mt} m ON m.{mcode}=cur.{code}
-        WHERE b.sd IS NOT NULL AND b.close>=b.mid+2*b.sd AND {spac} {universe_where}
-        ORDER BY change_pct DESC, trading_value DESC LIMIT %s
-        """).format(
-            code=sql.Identifier(o["stock_code"]), date=sql.Identifier(o["trade_date"]),
-            close=sql.Identifier(o["close"]), volume=sql.Identifier(o["volume"]), ot=ot,
-            name=sql.Identifier(m["stock_name"]), market=market_expr, mt=mt,
-            mcode=sql.Identifier(m["stock_code"]), spac=spac_filter, universe_where=universe_where,
-        )
-        params = [start, latest, latest] + universe_params + [int(query.limit)]
-        return self._rows_to_results(self._execute_timed(q, params))
-
-    def _ema_similarity(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def ema_similarity(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
         dates = self._recent_trade_dates(120, query.as_of_date)
         if len(dates) < 60:
@@ -1209,7 +1176,7 @@ class ScreeningRepository:
         FROM f CROSS JOIN base JOIN {ot} cur ON cur.{code}=f.stock_code AND cur.{date}=%s::varchar
         JOIN {mt} m ON m.{mcode}=cur.{code}
         WHERE f.stock_code::text<>%s AND {spac} {universe_where}
-        ORDER BY change_pct ASC, trading_value DESC LIMIT %s
+        ORDER BY change_pct ASC, trading_value DESC, stock_code LIMIT %s
         """).format(
             code=sql.Identifier(o["stock_code"]), close=sql.Identifier(o["close"]),
             date=sql.Identifier(o["trade_date"]), volume=sql.Identifier(o["volume"]), ot=ot,
@@ -1221,7 +1188,7 @@ class ScreeningRepository:
         return self._rows_to_results(self._execute_timed(q, params))
 
 
-    def _weekly_gainers(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def weekly_gainers(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
         dates = self._recent_week_dates(2, query.as_of_date or self.latest_trade_date())
         if len(dates) < 2:
@@ -1259,7 +1226,7 @@ class ScreeningRepository:
         WHERE cur.{date} = %s::varchar
           AND {spac}
           {universe_where}
-        ORDER BY change_pct DESC NULLS LAST
+        ORDER BY change_pct DESC NULLS LAST, cur.{code}
         LIMIT %s
         """).format(
             code=sql.Identifier(o["stock_code"]),
@@ -1283,7 +1250,7 @@ class ScreeningRepository:
         return self._rows_to_results(self._execute_timed(q, params))
 
 
-    def _turnover_top(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def turnover_top(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
 
         date_started = perf_counter()
@@ -1329,7 +1296,7 @@ class ScreeningRepository:
         WHERE o.{date} = %s::varchar
           AND {spac}
           {universe_where}
-        ORDER BY trading_value DESC NULLS LAST
+        ORDER BY trading_value DESC NULLS LAST, o.{code}
         LIMIT %s
         """).format(
             code=sql.Identifier(o["stock_code"]),
@@ -1353,7 +1320,7 @@ class ScreeningRepository:
         return self._rows_to_results(self._execute_timed(q, params))
 
 
-    def _ema20_leading_sector(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def ema20_leading_sector(self, query: ScreeningQuery) -> list[ScreeningResult]:
         """Select liquid leaders near EMA20 using stored trading-day windows.
 
         Market capitalization at the requested date is reconstructed from that
@@ -1532,7 +1499,7 @@ class ScreeningRepository:
         return self._rows_to_results(self._execute_timed(q, params))
 
 
-    def _high_52w(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def high_52w(self, query: ScreeningQuery) -> list[ScreeningResult]:
         o, m, ot, mt, market_expr, spac_filter = self._common_parts()
         dates = self._recent_trade_dates(252, query.as_of_date)
         if not dates:

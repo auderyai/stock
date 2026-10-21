@@ -1,30 +1,57 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
+from time import perf_counter
 
 from krx_research_nextgen.infrastructure.task_logging import TaskLog
 from krx_research_nextgen.models.screening import DateRange, RepeatedScreenResult, ScreeningKind, ScreeningQuery, ScreeningResult
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
 from krx_research_nextgen.services.bollinger_breadth_service import BollingerBreadthService
+from krx_research_nextgen.services.ema_alignment_strategy import EmaAlignmentStrategy
 
 
 WEEKLY_KINDS = {ScreeningKind.WEEKLY_GAINERS, ScreeningKind.WEEKLY_TURNOVER_TOP, ScreeningKind.BOLLINGER_BREAKOUT}
 
+DATABASE_QUERIES = {
+    ScreeningKind.EMA_SIMILARITY: "ema_similarity",
+    ScreeningKind.HIGH_52W: "high_52w",
+    ScreeningKind.NEAR_HIGH_52W: "near_high_52w",
+    ScreeningKind.DAILY_GAINERS: "daily_gainers",
+    ScreeningKind.WEEKLY_GAINERS: "weekly_gainers",
+    ScreeningKind.TURNOVER_TOP: "turnover_top",
+    ScreeningKind.WEEKLY_TURNOVER_TOP: "weekly_turnover_top",
+    ScreeningKind.EMA20_LEADING_SECTOR: "ema20_leading_sector",
+}
+
 
 class ScreeningService:
     def __init__(self, repository: ScreeningRepository, realtime_repository=None,
-                 bollinger_breadth: BollingerBreadthService | None = None) -> None:
+                 bollinger_breadth: BollingerBreadthService | None = None,
+                 ema_alignment: EmaAlignmentStrategy | None = None) -> None:
         self._repository = repository
         self._realtime = realtime_repository
         self._bollinger_breadth = bollinger_breadth
+        self._ema_alignment = ema_alignment or EmaAlignmentStrategy()
 
     def run(self, query: ScreeningQuery, *, period: DateRange | None = None) -> list[ScreeningResult]:
+        if query.source_mode == "realtime":
+            if self._realtime is None:
+                raise RuntimeError("실시간 조회 서비스가 구성되지 않았습니다.")
+            return self._realtime.run(query)
+        if query.source_mode != "database":
+            raise ValueError(f"지원하지 않는 자료 종류입니다: {query.source_mode}")
+
+        latest = self._repository.latest_trade_date()
+        if period is not None:
+            dates = self._calendar_trade_dates(
+                period, latest, weekly=query.kind in WEEKLY_KINDS
+            )
+            query = replace(query, as_of_date=dates[-1])
         if query.kind in {
             ScreeningKind.DAILY_BOLLINGER_UPPER_BREAKOUT,
             ScreeningKind.DAILY_BOLLINGER_LOWER_BREAKOUT,
         }:
-            if query.source_mode != "database":
-                raise ValueError("당일 볼린저밴드 돌파는 종가가 확정된 PostgreSQL 자료로만 판정합니다.")
             if self._bollinger_breadth is None:
                 raise RuntimeError("볼린저 시장 집계 서비스가 구성되지 않았습니다.")
             with TaskLog("bollinger_breadth_screening", kind=query.kind.value,
@@ -32,12 +59,6 @@ class ScreeningService:
                 rows = self._bollinger_breadth.run(query)
                 task.info(f"result_count={len(rows)}")
                 return rows
-        if query.source_mode == "realtime":
-            if self._realtime is None:
-                raise RuntimeError("실시간 조회 서비스가 구성되지 않았습니다.")
-            return self._realtime.run(query)
-        if query.source_mode != "database":
-            raise ValueError(f"지원하지 않는 자료 종류입니다: {query.source_mode}")
         with TaskLog(
             "screening",
             kind=query.kind.value,
@@ -50,21 +71,56 @@ class ScreeningService:
                 period is not None and query.kind is ScreeningKind.HIGH_52W
                 and period.start != period.end
             )
-            if period is not None and not ranged:
-                self.validate_period(period)
-            latest = self._repository.latest_trade_date()
             task.info(f"latest_trade_date={latest}")
             if ranged:
                 daily_rows = self._rows_by_date(query, self._period_dates(query, period))
                 rows = [row for _, daily in daily_rows for row in daily]
             else:
-                rows = self._repository.run(query)
+                rows = self._run_database(query, period, latest)
             for key, value in dict(self._repository.last_metrics).items():
                 task.info(f"{key}={value}")
             task.info(f"result_count={len(rows)}")
             if rows:
                 task.info(f"first_result={rows[0].stock_code}|{rows[0].stock_name}")
             return rows
+
+    def _run_database(
+        self, query: ScreeningQuery, period: DateRange | None, latest: str
+    ) -> list[ScreeningResult]:
+        if not 1 <= query.limit <= 500:
+            raise ValueError("screening limit must be 1..500")
+        self._repository.last_metrics = {}
+        started = perf_counter()
+        if query.kind is ScreeningKind.EMA_BEARISH_ALIGNMENT_BREAKOUT:
+            if period is None:
+                raise ValueError("EMA 기간 스크리닝에는 시작일과 종료일이 필요합니다.")
+            frame = self._repository.ema_alignment_input(
+                period.start.isoformat(), latest, query.market
+            )
+            rows = self._ema_alignment.select(
+                frame, start=period.start, end=period.end,
+                latest=date.fromisoformat(latest), limit=query.limit,
+            )
+        elif query.kind is ScreeningKind.BOLLINGER_BREAKOUT:
+            if self._bollinger_breadth is None:
+                raise RuntimeError("볼린저 계산 서비스가 구성되지 않았습니다.")
+            rows = self._bollinger_breadth.run_weekly(query)
+        else:
+            method_name = DATABASE_QUERIES.get(query.kind)
+            if method_name is None:
+                raise ValueError(f"Unsupported screening kind: {query.kind}")
+            query_method = getattr(self._repository, method_name, None)
+            if not callable(query_method):
+                raise TypeError(f"Repository does not implement {method_name}()")
+            rows = query_method(query)
+        enrich_started = perf_counter()
+        rows = self._repository.enrich_display_fields(rows)
+        self._repository.last_metrics.update(
+            display_enrichment_seconds=perf_counter() - enrich_started,
+            repository_total_seconds=perf_counter() - started,
+            result_count=len(rows),
+        )
+        return rows
 
     def status(self) -> dict[str, object]:
         with TaskLog("screening_status") as task:
@@ -82,16 +138,20 @@ class ScreeningService:
             return result
 
     def validate_period(self, period: DateRange) -> None:
-        stored = set(self._repository.period_trade_dates(
-            period.start.isoformat(), period.end.isoformat()
-        ))
-        missing = [value.isoformat() for value in (period.start, period.end)
-                   if value.isoformat() not in stored]
-        if missing:
-            raise ValueError(
-                "시작일과 종료일은 PostgreSQL에 저장된 거래일이어야 합니다. "
-                f"DB에 없는 날짜: {', '.join(missing)}"
-            )
+        self._calendar_trade_dates(period, self._repository.latest_trade_date())
+
+    def _calendar_trade_dates(
+        self, period: DateRange, latest: str, *, weekly: bool = False
+    ) -> list[str]:
+        """Resolve calendar boundaries to stored sessions without inventing dates."""
+        dates = self._repository.period_trade_dates(
+            period.start.isoformat(), period.end.isoformat(), weekly=weekly
+        )
+        if not dates:
+            raise ValueError("선택한 달력 구간 안에 PostgreSQL 거래일이 없습니다.")
+        if period.end > date.fromisoformat(latest):
+            raise ValueError(f"종료일은 최신 DB 거래일({latest}) 이후일 수 없습니다.")
+        return sorted(dates)
 
     def run_repeated(self, query: ScreeningQuery, period: DateRange) -> list[RepeatedScreenResult]:
         """Aggregate stocks appearing in the selected screen on at least two stored periods."""
@@ -130,11 +190,10 @@ class ScreeningService:
             return results
 
     def _period_dates(self, query: ScreeningQuery, period: DateRange) -> list[str]:
-        self.validate_period(period)
         dates = self._repository.period_dates_with_membership(
             query.market,
-            self._repository.period_trade_dates(
-                period.start.isoformat(), period.end.isoformat(),
+            self._calendar_trade_dates(
+                period, self._repository.latest_trade_date(),
                 weekly=query.kind in WEEKLY_KINDS,
             ),
         )

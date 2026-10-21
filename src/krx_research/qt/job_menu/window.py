@@ -289,8 +289,10 @@ class KrxJobMenuWindow(QMainWindow):
 
 
 def find_project_root() -> Path:
-    """Return canonical C:\stock project root."""
-    root = Path(r"C:\stock")
+    """Return the validated project root derived from this installation."""
+    from krx_research.project import STOCK_ROOT
+
+    root = STOCK_ROOT
     required = (
         root / "src" / "krx_research",
         root / "scripts",
@@ -298,7 +300,7 @@ def find_project_root() -> Path:
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(
-            "C:\\stock project root validation failed. Missing: "
+            f"Stock project root validation failed ({root}). Missing: "
             + ", ".join(missing)
         )
     return root
@@ -308,7 +310,8 @@ def main() -> int:
     """Launch KRX Job Menu visibly on the active desktop."""
     from pathlib import Path
 
-    runtime_log = Path(r"C:\stock\logs\runtime\run_krx_menu_runtime.log")
+    root = find_project_root()
+    runtime_log = root / "logs" / "runtime" / "run_krx_menu_runtime.log"
 
     def _runtime_log(message: str) -> None:
         try:
@@ -329,7 +332,6 @@ def main() -> int:
             f"available=({geo.x()},{geo.y()},{geo.width()},{geo.height()})"
         )
 
-    root = find_project_root()
     _runtime_log(f"[GUI] project_root={root}")
 
     from krx_research.qt.application.job_menu_dependencies import JobMenuDependencies

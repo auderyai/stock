@@ -3,17 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from krx_research_nextgen.models.scenario import ScenarioAnalysis, ScenarioCheckpoint, ScenarioRequest
+from krx_research_nextgen.models.scenario import (
+    EMA_SPANS, INDICATORS, ScenarioAnalysis, ScenarioCheckpoint, ScenarioRequest,
+)
 from krx_research_nextgen.services.technical_analysis_service import TechnicalAnalysisService
-
-
-EMA_SPANS = (5, 10, 15, 33, 56, 112, 224, 448)
-INDICATORS = {
-    "RSI(14)": "rsi", "Slow %K(5,3,3)": "stoch_slow_k",
-    "MACD oscillator (% price)": "macd_pct", "Bollinger position (sigma)": "bb_z",
-    "EMA 5 gap (%)": "ema5_gap", "EMA 15 gap (%)": "ema15_gap",
-    **{f"EMA {n} 일별 변화율 (%)": f"ema{n}_change_pct" for n in EMA_SPANS},
-}
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 
 
 class ScenarioService:
@@ -58,7 +52,11 @@ class ScenarioService:
         out["volatility20"] = out.ret1.rolling(20).std()
         out["volume_ratio"] = df.volume / df.volume.rolling(20).mean().replace(0, np.nan)
         out["macd_pct"] = out.macd_hist / close * 100
-        out["bb_z"] = (close - out.bb_mid) / close.rolling(20).std(ddof=0).replace(0, np.nan)
+        bollinger_period = DEFAULT_CHART_ANALYSIS_POLICY.bollinger.period
+        out["bb_z"] = (
+            (close - out.bb_mid)
+            / close.rolling(bollinger_period).std(ddof=0).replace(0, np.nan)
+        )
         for n in EMA_SPANS:
             out[f"ema{n}_change_pct"] = out[f"ema_{n}"].pct_change(fill_method=None) * 100
         out["ema5_gap"] = (close / out.ema_5 - 1) * 100; out["ema15_gap"] = (close / out.ema_15 - 1) * 100

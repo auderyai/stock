@@ -65,4 +65,4 @@ class AuxiliaryService:
         frame = self._repository.index_bars(str(entry["index_code"]))
         if frame.empty: raise ValueError(f"{entry['index_code']} 지수 일봉이 없습니다.")
         title = f"{entry['index_name']} ({entry['index_code']})"
-        return self._charts.prepare(title, frame, config=IndicatorConfig(rsi_period=14.0), timeframe="D")
+        return self._charts.prepare(title, frame, config=IndicatorConfig(), timeframe="D")

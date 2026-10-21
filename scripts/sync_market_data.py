@@ -55,7 +55,7 @@ def main() -> int:
     filtered_codes: dict[str, int] = {}
     ticker_results: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
-    with open_research_store(database_target) as store:
+    with open_research_store(database_target, read_only=False) as store:
         security_master = refresh_security_master(
             store,
             skip=args.skip_security_master,

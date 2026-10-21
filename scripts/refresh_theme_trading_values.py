@@ -6,7 +6,7 @@ from krx_research.theme_research import ThemeResearchRepository
 
 
 def main() -> int:
-    with ThemeResearchRepository() as repository:
+    with ThemeResearchRepository(read_only=False) as repository:
         repository.initialize_schema()
         dates = repository.available_dates()
         if not dates:

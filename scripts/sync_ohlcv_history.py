@@ -80,7 +80,7 @@ def main() -> int:
     layout.ensure()
     database_target = resolve_database_target(project_root)
     label = database_label(database_target)
-    with open_research_store(database_target) as store:
+    with open_research_store(database_target, read_only=False) as store:
         tickers = store.list_security_tickers(args.market) if args.all else args.tickers
         if not tickers:
             result = {

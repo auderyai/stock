@@ -57,9 +57,9 @@ def _parse_date(value: str) -> date:
         raise argparse.ArgumentTypeError(f"날짜 형식 오류: {value}") from exc
 
 
-def _repository() -> BaseDataRepository:
+def _repository(*, read_only: bool = True) -> BaseDataRepository:
     settings = DataEngineSettings.from_environment()
-    return BaseDataRepository(settings)
+    return BaseDataRepository(settings, read_only=read_only)
 
 
 def _print_frame(frame: pd.DataFrame, tail: int = 30) -> None:
@@ -71,7 +71,7 @@ def _print_frame(frame: pd.DataFrame, tail: int = 30) -> None:
 
 
 def command_setup(_: argparse.Namespace) -> int:
-    with _repository() as repository:
+    with _repository(read_only=False) as repository:
         repository.initialize_schema()
         identity = repository.database_identity()
         print(json.dumps(identity, ensure_ascii=False, indent=2, default=str))
@@ -88,7 +88,7 @@ def command_update(args: argparse.Namespace) -> int:
             f"{requested_date.isoformat()} -> {target_date.isoformat()} "
             "(20:10 KST 이전 또는 주말)"
         )
-    with _repository() as repository:
+    with _repository(read_only=False) as repository:
         # A cloud worker restores only the bounded worker snapshot.  Reapply the
         # idempotent core migration before every update so operational tables
         # such as market_core.update_runs are always present.
@@ -137,7 +137,7 @@ def command_backfill_investor(args: argparse.Namespace) -> int:
             f"요청 범위가 {len(dates)} 영업일입니다. 확인 후 --max-days {len(dates)} 이상으로 다시 실행하십시오."
         )
     totals = {"days": 0, "investor_rows": 0, "skipped": 0, "partial": 0}
-    with _repository() as repository:
+    with _repository(read_only=False) as repository:
         provider = PykrxBaseProvider(repository.settings.provider_delay_seconds)
         updater = IncrementalBaseUpdater(repository, provider)
         for selected_date in dates:
@@ -215,7 +215,7 @@ def command_archive(args: argparse.Namespace) -> int:
         print("DRY RUN: 원천 시장 스키마의 기술지표 테이블을 legacy_archive로 이동합니다.")
         print("적용하려면 --apply를 추가하십시오.")
         return 0
-    with _repository() as repository:
+    with _repository(read_only=False) as repository:
         repository.initialize_schema()
         archived = repository.archive_derived_tables()
         print("이동 완료:", ", ".join(archived) if archived else "대상 없음")
@@ -227,7 +227,7 @@ def command_restore(args: argparse.Namespace) -> int:
         print("DRY RUN: legacy_archive의 기술지표 테이블을 원래 시장 스키마로 복원합니다.")
         print("적용하려면 --apply를 추가하십시오.")
         return 0
-    with _repository() as repository:
+    with _repository(read_only=False) as repository:
         restored = repository.restore_derived_tables()
         print("복원 완료:", ", ".join(restored) if restored else "대상 없음")
     return 0
@@ -237,7 +237,7 @@ def command_purge(args: argparse.Namespace) -> int:
     if args.confirm != "DROP_DERIVED_DATA":
         print("취소: --confirm DROP_DERIVED_DATA가 필요합니다.", file=sys.stderr)
         return 2
-    with _repository() as repository:
+    with _repository(read_only=False) as repository:
         dropped = repository.purge_archived_derived_tables(args.confirm)
         print("영구 삭제 완료:", ", ".join(dropped) if dropped else "대상 없음")
     return 0

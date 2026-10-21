@@ -15,7 +15,7 @@ class ChartLearningRepository(AbstractContextManager["ChartLearningRepository"])
     """The only PostgreSQL boundary for chart-learning samples and OHLCV facts."""
 
     def __init__(self, database_target):
-        self.store = open_research_store(database_target)
+        self.store = open_research_store(database_target, read_only=False)
         self.conn = self.store.conn
 
     def __exit__(self, exc_type, exc, tb) -> None:

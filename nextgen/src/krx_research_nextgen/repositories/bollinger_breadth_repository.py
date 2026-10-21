@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
-import psycopg
-
 from krx_research_nextgen.infrastructure.db_settings import PostgreSQLSettings
+from krx_research_nextgen.infrastructure.postgresql import open_connection
 
 
 class BollingerBreadthRepository:
@@ -13,19 +12,22 @@ class BollingerBreadthRepository:
     def __init__(self, settings: PostgreSQLSettings | None = None) -> None:
         self._settings = settings or PostgreSQLSettings.from_c_stock_env(read_only=False)
 
-    def save(self, trade_date: date, rows: list[dict[str, object]], universe_count: int) -> None:
+    def save(
+        self,
+        trade_date: date,
+        rows: list[dict[str, object]],
+        universe_count: int,
+        counts: dict[str, int],
+        formula_version: str,
+    ) -> None:
         if universe_count <= 0:
             raise ValueError("볼린저 시장 집계의 전체 종목 수는 0보다 커야 합니다.")
-        upper = sum(row["direction"] == "UPPER" for row in rows)
-        lower = sum(row["direction"] == "LOWER" for row in rows)
-        counts = {
-            market: (
-                sum(row["market"].upper() == market for row in rows if row["direction"] == "UPPER"),
-                sum(row["market"].upper() == market for row in rows if row["direction"] == "LOWER"),
-            ) for market in ("KOSPI", "KOSDAQ")
-        }
-        with psycopg.connect(**self._settings.connect_kwargs(), autocommit=False,
-                             application_name="krx_bollinger_breadth") as conn:
+        with open_connection(
+            self._settings,
+            application_name="krx_bollinger_breadth",
+            read_only=False,
+            autocommit=False,
+        ) as conn:
             conn.execute("CREATE SCHEMA IF NOT EXISTS market_analysis")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS market_analysis.bollinger_breakout_daily (
@@ -78,5 +80,7 @@ class BollingerBreadthRepository:
                   kosdaq_lower_count=EXCLUDED.kosdaq_lower_count,
                   formula_version=EXCLUDED.formula_version,
                   calculated_at=now()
-            """, (trade_date, universe_count, upper, lower, *counts["KOSPI"], *counts["KOSDAQ"],
-                    "close-ema20-2std-v1"))
+            """, (trade_date, universe_count, counts["upper"], counts["lower"],
+                    counts["kospi_upper"], counts["kospi_lower"],
+                    counts["kosdaq_upper"], counts["kosdaq_lower"],
+                    formula_version))

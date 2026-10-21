@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from time import perf_counter
 
-ROOT = Path(r"C:\stock")
+ROOT = Path(__file__).resolve().parents[4]
 NEXTGEN_SRC = ROOT / "nextgen" / "src"
 if str(NEXTGEN_SRC) not in sys.path:
     sys.path.insert(0, str(NEXTGEN_SRC))
@@ -14,6 +14,7 @@ from krx_research_nextgen.infrastructure.log_paths import LOG_PATHS
 from krx_research_nextgen.models.screening import ScreeningKind
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
 from krx_research_nextgen.services.screening_service import ScreeningService
+from krx_research_nextgen.services.screening_export_service import ScreeningExportService
 
 
 # Build legacy names dynamically so path-normalization scripts cannot rewrite
@@ -43,7 +44,7 @@ def scan_forbidden_log_paths() -> list[str]:
             if any(part in skip_exact for part in parts):
                 continue
 
-            # Ignore temporary patch/extraction folders at C:\stock root.
+            # Ignore temporary patch/extraction folders at the project root.
             if parts and parts[0].upper().startswith("C_STOCK_"):
                 continue
 
@@ -94,7 +95,7 @@ def main() -> int:
 
     with ScreeningRepository() as repo:
         service = ScreeningService(repo)
-        controller = ScreeningController(service)
+        controller = ScreeningController(service, ScreeningExportService())
 
         print("HOTFIX6B_BENCHMARK:")
         for pass_name in ("COLD_PASS", "WARM_PASS"):

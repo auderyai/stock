@@ -54,3 +54,17 @@ class AiResultPresenter:
         if not number.is_finite(): return ""
         decimals = min(4, max(0, -number.as_tuple().exponent))
         return f"{number:,.{decimals}f}".rstrip("0").rstrip(".") if decimals else f"{number:,.0f}"
+
+
+def navigation_payload(presentation: AiResultPresentation, title: str) -> dict:
+    """Adapt a typed AI-table presentation to the common chart navigation contract."""
+    return {
+        "title": title,
+        "headers": presentation.headers,
+        "alignments": presentation.alignments,
+        "items": [
+            {"code": code, "values": values}
+            for code, values in zip(presentation.codes, presentation.rows, strict=True)
+            if code
+        ],
+    }

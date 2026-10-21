@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from .investor import PROVIDER_TO_CODE
+from krx_research.analytics.investor import PROVIDER_TO_CODE
 
 MARKETS = ("KOSPI", "KOSDAQ", "KONEX")
 MARKET_TO_KRX_ID = {"KOSPI": "STK", "KOSDAQ": "KSQ", "KONEX": "KNX"}

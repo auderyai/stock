@@ -9,13 +9,12 @@ from krx_research_nextgen.models.screening import (
 )
 from krx_research_nextgen.services.screening_service import ScreeningService
 from krx_research_nextgen.services.screening_export_service import ScreeningExportService
-from krx_research_nextgen.presentation.repeated_screen_table import HEADERS as REPEATED_HEADERS, row_values as repeated_values
 
 
 class ScreeningController:
-    def __init__(self, service: ScreeningService, exporter: ScreeningExportService | None = None) -> None:
+    def __init__(self, service: ScreeningService, exporter: ScreeningExportService) -> None:
         self._service = service
-        self._exporter = exporter or ScreeningExportService()
+        self._exporter = exporter
 
     @staticmethod
     def kinds() -> list[ScreeningKind]:
@@ -59,5 +58,11 @@ class ScreeningController:
     def export(self, rows: list[ScreeningResult], path: str) -> None:
         self._exporter.export(rows, path)
 
-    def export_repeated(self, rows: list[RepeatedScreenResult], path: str) -> None:
-        self._exporter.export_table(REPEATED_HEADERS, [repeated_values(row) for row in rows], path, "기간 내 다빈도 종목")
+    def export_repeated(
+        self,
+        rows: list[RepeatedScreenResult],
+        path: str,
+        *,
+        layout: str = "detailed",
+    ) -> None:
+        self._exporter.export_repeated(rows, path, layout=layout)

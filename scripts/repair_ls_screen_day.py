@@ -14,7 +14,7 @@ from krx_research.collectors.ls_index_api import LSIndexClient
 from krx_research.collectors.ls_index_membership import fetch_ls_membership
 from krx_research.collectors.xing_t8451 import XingT8451Client
 from krx_research.data_engine.config import DataEngineSettings
-from krx_research.data_engine.postgresql import BaseDataRepository
+from krx_research.data_engine.operational_repository import OperationalDataRepository
 from krx_research.data_engine.screen_coverage import expected_market_counts
 
 def main(argv=None):
@@ -24,7 +24,9 @@ def main(argv=None):
     os.chdir(ROOT)
     day=args.date;start=day-dt.timedelta(days=14)
     settings=DataEngineSettings.from_environment()
-    with BaseDataRepository(settings,application_name='ls_screen_missing_day_repair') as repository:
+    with OperationalDataRepository(
+        settings, 'ls_screen_missing_day_repair', read_only=False
+    ) as repository:
         repository.initialize_schema()
         with LSIndexClient(project_root=ROOT) as client, XingT8451Client.from_environment(ROOT) as price_client:
             print('LS 전체 종목 목록 확인...',flush=True)

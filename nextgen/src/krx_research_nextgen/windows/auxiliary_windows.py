@@ -1,33 +1,38 @@
 from __future__ import annotations
 
+import pandas as pd
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QAbstractItemView, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow, QSplitter, QVBoxLayout, QWidget
 
 from krx_research_nextgen.presentation.embedded_finplot_widget import EmbeddedFinplotWidget
 from krx_research_nextgen.presentation.number_format import format_number
+from krx_research_nextgen.widgets.result_table import ResultTable
+from krx_research.presentation.table_policy import TablePresentationPolicy
 
 
-class _Table(QTableWidget):
-    def __init__(self, headers: tuple[str, ...]) -> None:
-        super().__init__(0, len(headers)); self.setHorizontalHeaderLabels(headers)
-        for column in range(self.columnCount()):
-            self.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.setAlternatingRowColors(True); self.verticalHeader().setVisible(False)
+class _Table(ResultTable):
+    def __init__(self, headers: tuple[str, ...], *, identity_key: str) -> None:
+        self._headers, self._identity_key = headers, identity_key
+        centered = tuple(
+            f"value_{index}" for index, header in enumerate(headers) if header == "코드"
+        )
+        super().__init__(
+            identity_columns=(identity_key,),
+            identity_width=0,
+            policy=TablePresentationPolicy(center_columns=centered),
+        )
 
-    def fill(self, rows, values, *, align_from: int = 3, alignments=None) -> None:
-        self.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            for c, value in enumerate(values(row)):
-                alignment = ({"center": Qt.AlignmentFlag.AlignCenter,
-                              "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                              "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter}[alignments[c]]
-                             if alignments else Qt.AlignmentFlag.AlignRight if c >= align_from else Qt.AlignmentFlag.AlignCenter)
-                item = QTableWidgetItem(str(value)); item.setTextAlignment(alignment)
-                self.setItem(r, c, item)
-        self.resizeColumnsToContents()
+    def fill(self, rows, values) -> None:
+        fields = tuple(f"value_{index}" for index in range(len(self._headers)))
+        frame = pd.DataFrame(({
+            self._identity_key: row[self._identity_key],
+            **dict(zip(fields, values(row), strict=True)),
+        } for row in rows), columns=(self._identity_key, *fields))
+        self.set_frame(
+            frame,
+            labels={self._identity_key: "코드", **dict(zip(fields, self._headers, strict=True))},
+        )
+        self.setColumnHidden(0, True)
 
 
 class InvestorDashboardWindow(QMainWindow):
@@ -46,8 +51,8 @@ class InvestorDashboardWindow(QMainWindow):
                 tables = {}; pair = QHBoxLayout(); box.addLayout(pair, 1)
                 for direction in ("순매수", "순매도"):
                     side = QGroupBox(f"{direction} Top 10"); side_box = QVBoxLayout(side)
-                    table = _Table(self.TABLE_HEADERS)
-                    table.cellDoubleClicked.connect(lambda row, _column, t=table: self._open_chart(t, row))
+                    table = _Table(self.TABLE_HEADERS, identity_key="stock_code")
+                    table.chartRequested.connect(lambda t=table: self._open_chart(t))
                     side_box.addWidget(table); pair.addWidget(side); tables[direction] = table
                 self.panels[(market, key)] = (summary, tables); self.grid.addWidget(group, row, column)
 
@@ -61,9 +66,7 @@ class InvestorDashboardWindow(QMainWindow):
             for direction, table in tables.items():
                 selected = [x for x in rows if x["market"] == market and x["investor"] == {"foreign":"외국인","institution":"기관","individual":"개인"}[key] and x["direction"] == direction]
                 self._table_rows[table] = selected
-                table.fill(selected, self._row_values,
-                           alignments=("right", "left", "right", "right", "right", "right", "right"))
-                for row, item in enumerate(selected): table.item(row, 1).setData(Qt.ItemDataRole.UserRole, item["stock_code"])
+                table.fill(selected, self._row_values)
         self.status.setText(f"수급 기준일 {start} ~ {end} · 금액 단위: 억원 · 수익률 단위: % · PostgreSQL LS t1702 검증 자료")
 
     def show_error(self, text: str) -> None: self.status.setText(text)
@@ -73,14 +76,10 @@ class InvestorDashboardWindow(QMainWindow):
                 self._number(item["daily_return"], 2), self._number(item["weekly_return"], 2),
                 self._number(item["monthly_return"], 2), self._number(item["trading_value_eok"]))
 
-    def _open_chart(self, table, row: int) -> None:
-        item = table.item(row, 1)
-        if not item or not item.data(Qt.ItemDataRole.UserRole): return
-        navigation = {"headers": self.TABLE_HEADERS,
-                      "title": "수급 대시보드",
-                      "alignments": ("right", "left", "right", "right", "right", "right", "right"),
-                      "items": [{"code": x["stock_code"], "values": self._row_values(x)} for x in self._table_rows.get(table, [])]}
-        self.stock_requested.emit(str(item.data(Qt.ItemDataRole.UserRole)), navigation)
+    def _open_chart(self, table) -> None:
+        ticker = table.current_ticker()
+        if not ticker: return
+        self.stock_requested.emit(ticker, table.navigation_payload("수급 대시보드"))
 
 
 class MarketIndexWindow(QMainWindow):
@@ -91,8 +90,8 @@ class MarketIndexWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal); self.setCentralWidget(splitter)
         chart_host = QWidget(); chart_layout = QVBoxLayout(chart_host); self.chart = EmbeddedFinplotWidget(); self.chart.initialize_finplot(); chart_layout.addWidget(self.chart, 1)
         self.status = QLabel("지수 목록을 불러오는 중입니다..."); chart_layout.addWidget(self.status); splitter.addWidget(chart_host)
-        self.table = _Table(("시장", "코드", "종합·업종 지수", "기준일", "지수", "당일(%)")); splitter.addWidget(self.table); splitter.setSizes([1280, 400])
-        self.table.itemSelectionChanged.connect(self._selected); self._entries = []
+        self.table = _Table(("시장", "코드", "종합·업종 지수", "기준일", "지수", "당일(%)"), identity_key="index_code"); splitter.addWidget(self.table); splitter.setSizes([1280, 400])
+        self.table.currentTickerChanged.connect(self._selected); self._entries = []
 
     def render_entries(self, entries) -> None:
         self._entries = entries
@@ -100,9 +99,8 @@ class MarketIndexWindow(QMainWindow):
         self.status.setText(f"종합·업종 지수 {len(entries):,}개 · 행을 선택하십시오.")
         if entries: self.table.selectRow(0)
 
-    def _selected(self) -> None:
-        row = self.table.currentRow()
-        if 0 <= row < len(self._entries): self.index_requested.emit(str(self._entries[row]["index_code"]))
+    def _selected(self, code: str) -> None:
+        if code: self.index_requested.emit(code)
 
     def show_bundle(self, bundle) -> None:
         self.chart.render(bundle, timeframe="D"); self.status.setText(f"{bundle.symbol} · 최근 {len(bundle.frame):,}개 봉")

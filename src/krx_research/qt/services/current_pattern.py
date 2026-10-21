@@ -7,30 +7,17 @@ from enum import Enum
 import numpy as np
 import pandas as pd
 
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 from krx_research.qt.models.pattern import PatternRepository
+from krx_research.qt.models.pattern_queries import CurrentPatternKind, CurrentPatternQuery
 
 from .pattern_policy import PatternQualityPolicy
-
-
-class CurrentPatternKind(str, Enum):
-    DOUBLE_BOTTOM = "현재 이중바닥"
-    CUP_WITH_HANDLE = "현재 컵위드핸들"
 
 
 class PatternStage(str, Enum):
     FORMING = "형성 중"
     READY = "돌파 대기"
     CONFIRMED = "최근 돌파·구조 유지"
-
-
-@dataclass(frozen=True, slots=True)
-class CurrentPatternQuery:
-    kind: CurrentPatternKind
-    top_n: int = 50
-
-    def __post_init__(self) -> None:
-        if not 1 <= self.top_n <= 100:
-            raise ValueError("검색 결과 수는 1~100이어야 합니다.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +62,10 @@ class DoubleBottomDetector:
         if len(data) < 45:
             return None
         close = data.close.to_numpy(float)
-        smooth = pd.Series(close).ewm(span=5, adjust=False).mean().to_numpy()
+        smooth = pd.Series(close).ewm(
+            span=DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods[0],
+            adjust=False,
+        ).mean().to_numpy()
         lows = SwingPoints.extrema(smooth, True)
         best = None
         for first, second in ((a, b) for a in lows for b in lows if 8 <= b - a <= 110):
@@ -138,7 +128,10 @@ class CupWithHandleDetector:
         if len(data) < 45:
             return None
         close = data.close.to_numpy(float)
-        smooth = pd.Series(close).ewm(span=5, adjust=False).mean().to_numpy()
+        smooth = pd.Series(close).ewm(
+            span=DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods[0],
+            adjust=False,
+        ).mean().to_numpy()
         count = len(close)
         left = int(np.argmax(smooth[:max(12, count // 3)]))
         low_limit = max(left + 6, count // 5)

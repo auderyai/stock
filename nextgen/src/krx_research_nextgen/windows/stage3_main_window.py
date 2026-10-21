@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+import pandas as pd
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
-    QAbstractItemView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -18,6 +16,7 @@ from PyQt6.QtWidgets import (
 from krx_research_nextgen.controllers.main_window_controller import MainWindowController
 from krx_research_nextgen.models.security import SecurityRecord
 from krx_research_nextgen.presentation.embedded_finplot_widget import EmbeddedFinplotWidget
+from krx_research_nextgen.widgets.result_table import ResultTable
 
 
 class Stage3MainWindow(QMainWindow):
@@ -52,13 +51,7 @@ class Stage3MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root_layout.addWidget(splitter, 1)
 
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["종목코드", "종목명", "시장"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setVisible(False)
+        self.table = ResultTable()
         self.table.setColumnWidth(0, 85)
         self.table.setColumnWidth(1, 160)
         self.table.setColumnWidth(2, 70)
@@ -80,8 +73,8 @@ class Stage3MainWindow(QMainWindow):
         self.search_edit.returnPressed.connect(self._search_now)
         self._search_timer.timeout.connect(self._search_now)
 
-        self.table.itemSelectionChanged.connect(self._selection_timer.start)
-        self.table.itemDoubleClicked.connect(lambda _item: self._chart_now())
+        self.table.currentTickerChanged.connect(lambda _ticker: self._selection_timer.start())
+        self.table.chartRequested.connect(self._chart_now)
         self._selection_timer.timeout.connect(self._chart_now)
 
         self._load_status()
@@ -111,31 +104,18 @@ class Stage3MainWindow(QMainWindow):
             self._show_error("종목 검색 오류", exc)
 
     def _populate_table(self, records: list[SecurityRecord]) -> None:
-        self.table.blockSignals(True)
-        try:
-            self.table.setRowCount(len(records))
-            for row, record in enumerate(records):
-                code_item = QTableWidgetItem(record.stock_code)
-                code_item.setData(Qt.ItemDataRole.UserRole, record.stock_code)
-                self.table.setItem(row, 0, code_item)
-                self.table.setItem(row, 1, QTableWidgetItem(record.stock_name))
-                self.table.setItem(row, 2, QTableWidgetItem(record.market))
-            if records:
-                self.table.selectRow(0)
-        finally:
-            self.table.blockSignals(False)
+        frame = pd.DataFrame(
+            ({"stock_code": item.stock_code, "stock_name": item.stock_name, "market": item.market}
+             for item in records),
+            columns=("stock_code", "stock_name", "market"),
+        )
+        self.table.set_frame(frame, labels={"stock_code": "종목코드", "stock_name": "종목명", "market": "시장"})
 
         if records:
             self._selection_timer.start()
 
     def _selected_code(self) -> str | None:
-        row = self.table.currentRow()
-        if row < 0:
-            return None
-        item = self.table.item(row, 0)
-        return None if item is None else str(
-            item.data(Qt.ItemDataRole.UserRole) or item.text()
-        ).strip()
+        return self.table.current_ticker()
 
     def _chart_now(self) -> None:
         code = self._selected_code()

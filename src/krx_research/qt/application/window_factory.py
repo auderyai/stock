@@ -8,6 +8,7 @@ from krx_research.qt.controllers.investor_dashboard_controller import InvestorDa
 from krx_research.qt.controllers.market_index_controller import MarketIndexController
 from krx_research.qt.controllers.theme_controller import ThemeResearchController
 from krx_research.qt.services.featured_service import FeaturedResearchService
+from krx_research.qt.services.error_log_service import ErrorLogService
 from krx_research.qt.services.investor_dashboard_service import InvestorDashboardService
 from krx_research.qt.services.market_index_service import MarketIndexService
 from krx_research.qt.repositories.market_index_repository import MarketIndexRepository
@@ -69,7 +70,7 @@ class AuxiliaryWindowFactory:
     def featured(self, parent) -> ManagedWindow:
         view = FeaturedResearchView(parent=parent)
         controller = FeaturedResearchController(
-            view, FeaturedResearchService(), self._chart_service, parent=view
+            view, FeaturedResearchService(), self._chart_service, ErrorLogService(), parent=view
         )
         controller.initialize()
         return ManagedWindow(view=view, controller=controller)
@@ -77,7 +78,7 @@ class AuxiliaryWindowFactory:
     def theme(self, parent) -> ManagedWindow:
         view = ThemeResearchView(parent=parent)
         controller = ThemeResearchController(
-            view, ThemeResearchService(), self._chart_service, parent=view
+            view, ThemeResearchService(), self._chart_service, ErrorLogService(), parent=view
         )
         controller.initialize()
         return ManagedWindow(view=view, controller=controller)
@@ -85,7 +86,8 @@ class AuxiliaryWindowFactory:
     def research_archive(self, parent) -> ManagedWindow:
         view = ResearchArchiveView(parent=parent)
         controller = ResearchArchiveController(
-            view, ResearchArchiveService(self._database_target), self._chart_service, parent=view
+            view, ResearchArchiveService(self._database_target), self._chart_service,
+            ErrorLogService(), parent=view
         )
         controller.initialize()
         return ManagedWindow(view=view, controller=controller)

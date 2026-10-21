@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from krx_research.data_engine.config import DataEngineSettings
-from krx_research.data_engine.postgresql import BaseDataRepository
+from krx_research.data_engine.operational_repository import OperationalDataRepository
 from krx_research.data_engine.service import MarketDataService
 
 
@@ -18,7 +18,7 @@ def main() -> int:
     parser.add_argument("ticker", nargs="?", default="222800")
     parser.add_argument("--timeframe", choices=["D", "W", "M", "Q", "Y"], default="D")
     args = parser.parse_args()
-    with BaseDataRepository(DataEngineSettings.from_environment()) as repository:
+    with OperationalDataRepository(DataEngineSettings.from_environment(), "benchmark_on_demand") as repository:
         service = MarketDataService(repository, cache_ttl_seconds=300)
         started = perf_counter()
         cold = service.get_indicators(args.ticker, args.timeframe)

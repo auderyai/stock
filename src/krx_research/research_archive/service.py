@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from krx_research.archive.paths import ArchiveLayout
+from krx_research.project import STOCK_ROOT
 from .parsers import BrokerPdfParser, CodexImageParser, OpenAIImageParser
 from .repository import ResearchArchiveRepository
 from .models import ParsedResearchSource
@@ -17,7 +18,7 @@ from .models import ParsedResearchSource
 class ResearchArchiveService:
     """Application boundary for immutable originals, extraction and DB reconciliation."""
 
-    def __init__(self, database_target, root: str | Path = Path(r"C:\stock")):
+    def __init__(self, database_target, root: str | Path = STOCK_ROOT):
         self.database_target, self.layout = database_target, ArchiveLayout(root)
 
     def initialize(self) -> None:

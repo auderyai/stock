@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from krx_research.collectors.realtime_quotes import QUOTE_VENUES
 from krx_research.qt.models.screen_query import ScreenQuery
 from krx_research.qt.widgets.rank_limit_control import RankLimitControl
-from krx_research.ui.data import DATABASE_SOURCE_MODE, REALTIME_SOURCE_MODE
+from krx_research.policies.workstation_options import DATABASE_SOURCE_MODE, REALTIME_SOURCE_MODE
 
 class QueryPanel(QWidget):
     queryChanged = Signal()

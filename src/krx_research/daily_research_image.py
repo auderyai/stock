@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from krx_research.database.settings import resolve_database_target
+from krx_research.project import STOCK_ROOT
 from krx_research.featured_research.parser import FeaturedRow, ParsedFeaturedSpreadsheet
 from krx_research.featured_research.repository import FeaturedResearchRepository
 from krx_research.research_archive import ResearchArchiveService
@@ -38,7 +39,7 @@ class DailyImageImportResult:
 class DailyResearchImageImporter:
     """Archive image evidence, preview DB reconciliation, then commit on approval."""
 
-    def __init__(self, kind: DailyKind, root: str | Path = Path(r"C:\stock")) -> None:
+    def __init__(self, kind: DailyKind, root: str | Path = STOCK_ROOT) -> None:
         if kind not in {"featured", "theme"}:
             raise ValueError(f"지원하지 않는 일일자료 유형: {kind}")
         self.kind, self.root = kind, Path(root).resolve()
@@ -88,7 +89,7 @@ class DailyResearchImageImporter:
                     self.root, file_name, digest, "Codex image", report_date,
                     tuple(self._featured_row(index, row) for index, row in enumerate(rows, 1)),
                 )
-                with FeaturedResearchRepository() as repository:
+                with FeaturedResearchRepository(read_only=False) as repository:
                     repository.initialize_schema()
                     existing = repository.find_batch_by_sha256(digest)
                     matched, unmatched = ((int(existing["matched_count"]), int(existing["unmatched_count"]))
@@ -98,7 +99,7 @@ class DailyResearchImageImporter:
                     self.root, file_name, digest, "Codex image", report_date,
                     tuple(self._theme_row(index, row) for index, row in enumerate(rows, 1)),
                 )
-                with ThemeResearchRepository() as repository:
+                with ThemeResearchRepository(read_only=False) as repository:
                     repository.initialize_schema()
                     existing = repository.find_batch_by_sha256(digest)
                     result = None if existing else repository.insert_spreadsheet(parsed)

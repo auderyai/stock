@@ -15,8 +15,7 @@ import urllib.request
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
 from import_research_pdf import main as import_pdf
-from krx_research.data_engine.config import DataEngineSettings
-from krx_research.data_engine.postgresql import BaseDataRepository
+from krx_research.research_documents import ResearchDocumentRepository
 
 BASE='https://finance.naver.com'
 LIST=BASE+'/research/company_list.naver'
@@ -88,13 +87,7 @@ def main(argv=None):
             raise RuntimeError(f'네이버 리서치 목록 {page}쪽을 해석하지 못했습니다. 구조 변경 여부를 확인하세요.')
         for link,title in items:discovered[link]=title
     imported=0;unchanged=0;failures=[]
-    with BaseDataRepository(DataEngineSettings.from_environment(),application_name='naver_research_discovery') as repo:
-        with repo.conn.transaction():
-            repo.conn.execute('''CREATE SCHEMA IF NOT EXISTS research''')
-            repo.conn.execute('''CREATE TABLE IF NOT EXISTS research.source_item (
-                source_url text PRIMARY KEY, title text, pdf_url text, sha256 char(64),
-                last_seen timestamptz NOT NULL DEFAULT now(),
-                last_error text, imported_at timestamptz)''')
+    with ResearchDocumentRepository() as repo:
         for detail,title in discovered.items():
             try:
                 article,charset=get(session,detail)
@@ -103,8 +96,7 @@ def main(argv=None):
                 if len(body)>25_000_000 or not body.startswith(b'%PDF-'):
                     raise ValueError('PDF 형식이 아니거나 25 MB를 초과합니다')
                 digest=hashlib.sha256(body).hexdigest()
-                before=repo.conn.execute('SELECT sha256 FROM research.source_item WHERE source_url=%s',(detail,)).fetchone()
-                if before and before['sha256']==digest:
+                if repo.source_digest(detail)==digest:
                     unchanged+=1
                     continue
                 with tempfile.NamedTemporaryFile(suffix='.pdf',delete=False) as f:
@@ -113,22 +105,11 @@ def main(argv=None):
                     if import_pdf([str(pdf),'--source-url',detail]):
                         raise ValueError('PDF 등록 스크립트 오류')
                 finally:pdf.unlink(missing_ok=True)
-                with repo.conn.transaction():
-                    repo.conn.execute('''INSERT INTO research.source_item
-                      (source_url,title,pdf_url,sha256,imported_at,last_error)
-                      VALUES (%s,%s,%s,%s,now(),NULL)
-                      ON CONFLICT(source_url) DO UPDATE SET
-                      title=EXCLUDED.title,pdf_url=EXCLUDED.pdf_url,
-                      sha256=EXCLUDED.sha256,imported_at=now(),last_seen=now(),last_error=NULL''',
-                      (detail,title,link,digest))
+                repo.save_source(detail,title,link,digest)
                 imported+=1
             except Exception as exc:
                 failures.append((detail,str(exc)))
-                with repo.conn.transaction():
-                    repo.conn.execute('''INSERT INTO research.source_item(source_url,title,last_error)
-                      VALUES (%s,%s,%s) ON CONFLICT(source_url) DO UPDATE SET
-                      title=EXCLUDED.title,last_error=EXCLUDED.last_error,last_seen=now()''',
-                      (detail,title,str(exc)[:350]))
+                repo.save_source_error(detail,title,str(exc))
     print(f'네이버 리서치 목록 {len(discovered)}건, 신규/개정 {imported}건, 동일 PDF {unchanged}건, 실패 {len(failures)}건')
     for url,error in failures[:8]:print(f'미완료: {url}: {error}',file=sys.stderr)
     return 2 if failures else 0

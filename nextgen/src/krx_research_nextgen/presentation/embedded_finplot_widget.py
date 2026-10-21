@@ -12,11 +12,12 @@ from PyQt6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 from krx_research_nextgen.models.chart_data import ChartBundle, TIMEFRAME_LABELS
 from krx_research_nextgen.presentation.number_format import format_number
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 
 
 UP, DOWN, FLAT = "#d62728", "#1f77b4", "#808080"
 BOLLINGER = "#5f88b1"
-EMA_WINDOWS = (5, 10, 15, 33, 56, 112, 224, 448)
+EMA_WINDOWS = DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods
 EMA_COLORS = ("#ffff00", "#00ff00", "#0000ff", "#388e8e", "#e600e6", "#ff8042", "#a52a00", "#b30000")
 INVESTOR_COLORS = {"institution": "#8e44ad", "foreign": "#00897b", "individual": "#ef6c00"}
 INVESTOR_LABELS = {"institution": "기관", "foreign": "외국인", "individual": "개인"}

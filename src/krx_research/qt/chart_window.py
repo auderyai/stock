@@ -5,6 +5,7 @@ import pandas as pd
 
 from krx_research.qt.controllers.chart_controller import ChartController
 from krx_research.qt.services.chart_service import ChartService
+from krx_research.qt.services.error_log_service import ErrorLogService
 from krx_research.qt.windows.chart_window import ChartWindow as _ChartView
 
 
@@ -24,7 +25,7 @@ class ChartWindow(_ChartView):
         if not isinstance(service, ChartService):
             service = ChartService(service)
         super().__init__(ticker, quote_venue=quote_venue, navigation_enabled=navigation_enabled, parent=parent)
-        self.controller = ChartController(self, service, parent=self)
+        self.controller = ChartController(self, service, ErrorLogService(), parent=self)
         if navigation_enabled and navigation_frame is not None:
             self.set_navigation_results(navigation_frame, navigation_labels or {}, selected_ticker=ticker)
         self.controller.load()

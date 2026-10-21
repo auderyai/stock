@@ -12,7 +12,7 @@ from krx_research.qt.services.current_pattern import CurrentPatternSearchService
 from krx_research.qt.services.chart_service import ChartService
 from krx_research.qt.services.pattern_similarity import PatternSimilaritySearchService, PatternVectorCache
 from krx_research.qt.services.security_search_service import SecuritySearchService
-from krx_research.ui.data import WorkstationData
+from krx_research.data_engine.workstation_repository import WorkstationData
 
 
 class JobMenuDependencies:

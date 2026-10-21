@@ -7,6 +7,7 @@ from pathlib import Path
 
 from krx_research.collectors.index_membership import INDEX_GAINER_DEFINITIONS, IndexMembership
 from .postgresql import BaseDataRepository
+from psycopg import sql
 
 DDL = (
     "CREATE TABLE IF NOT EXISTS market_core.index_membership_snapshot ("
@@ -24,9 +25,29 @@ class PostgreSQLIndexMembershipStore:
         self.settings = settings
 
     def initialize(self) -> None:
-        with BaseDataRepository(self.settings, application_name="index_membership_schema") as repo:
+        with BaseDataRepository(self.settings, application_name="index_membership_schema", read_only=False) as repo:
             with repo.conn.transaction():
                 repo.conn.execute(DDL)
+
+    def trade_dates(self, start: dt.date, end: dt.date) -> list[dt.date]:
+        """Return authoritative trading dates from the configured OHLCV table."""
+        with BaseDataRepository(self.settings, application_name="membership_backfill_dates") as repo:
+            table = sql.SQL("{}.{}").format(
+                sql.Identifier(self.settings.ohlcv_schema),
+                sql.Identifier(self.settings.ohlcv_table),
+            )
+            rows = repo.conn.execute(
+                sql.SQL(
+                    "SELECT DISTINCT trade_date::date AS d FROM {} "
+                    "WHERE trade_date::date BETWEEN %s::date AND %s::date ORDER BY d"
+                ).format(table),
+                (start, end),
+            ).fetchall()
+        return [row["d"] for row in rows]
+
+    def latest_ohlcv_date(self) -> dt.date | None:
+        with BaseDataRepository(self.settings, application_name="index_membership_date") as repo:
+            return repo.latest_ohlcv_date()
 
     def upsert(self, membership: IndexMembership) -> int:
         return self.upsert_many((membership,))
@@ -38,7 +59,7 @@ class PostgreSQLIndexMembershipStore:
             return 0
         self.initialize()
         total = 0
-        with BaseDataRepository(self.settings, application_name="index_membership_write") as repo:
+        with BaseDataRepository(self.settings, application_name="index_membership_write", read_only=False) as repo:
             with repo.conn.transaction():
                 for membership in memberships:
                     definition = INDEX_GAINER_DEFINITIONS[membership.screen_type]

@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from krx_research.project import STOCK_ROOT
 
-ENV_FILE = Path(r"C:\stock\.env")
+ENV_FILE = STOCK_ROOT / ".env"
 
 
 def _read_env(path: Path = ENV_FILE) -> dict[str, str]:
@@ -55,7 +56,7 @@ class PostgreSQLSettings:
         user = _first(values, user_keys, "krx_writer")
         password = _first(values, password_keys)
         if not password:
-            raise RuntimeError("PostgreSQL password is missing in C:\\stock\\.env")
+            raise RuntimeError(f"PostgreSQL password is missing in {ENV_FILE}")
         if port == 3306:
             raise RuntimeError("MariaDB port 3306 is forbidden.")
         return cls(

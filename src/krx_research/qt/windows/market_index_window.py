@@ -8,7 +8,7 @@ from krx_research.qt.presentation.table_policy import TablePresentationPolicy
 from krx_research.qt.widgets.chart_controls import ChartControlPanel, ClassicStrategyPanel
 from krx_research.qt.widgets.result_table import ResultTable
 from krx_research.ui.charts import build_chart_figure
-from krx_research.ui.on_demand import TIMEFRAME_LABELS
+from krx_research.policies.workstation_options import TIMEFRAME_LABELS
 
 
 _INDEX_HEADERS = {

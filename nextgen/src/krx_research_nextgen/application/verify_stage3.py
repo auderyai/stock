@@ -8,6 +8,7 @@ from krx_research_nextgen.repositories.postgresql_chart_repository import Postgr
 from krx_research_nextgen.repositories.security_repository import SecurityRepository
 from krx_research_nextgen.services.market_chart_service import MarketChartService
 from krx_research_nextgen.services.security_search_service import SecuritySearchService
+from krx_research_nextgen.services.scenario_service import ScenarioService
 
 
 def _imports(path: Path) -> list[str]:
@@ -49,6 +50,7 @@ def main() -> int:
         controller = MainWindowController(
             SecuritySearchService(security_repo),
             MarketChartService(chart_repo),
+            ScenarioService(),
         )
 
         rows = controller.search_securities("", limit=20)

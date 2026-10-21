@@ -10,6 +10,9 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
+from krx_research.analytics.indicators import exponential_rsi
+
 INDICATORS = {
     "RSI(14)": "rsi",
     "Slow %K(5,3,3)": "stoch_k",
@@ -18,7 +21,7 @@ INDICATORS = {
     "EMA 5 gap (%)": "ema5_gap",
     "EMA 15 gap (%)": "ema15_gap",
     **{f"EMA {span} 일별 변화율 (%)": f"ema{span}_change_pct"
-       for span in (5, 10, 15, 33, 56, 112, 224, 448)},
+       for span in DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods},
 }
 FEATURES = ["ret1", "ret5", "ret20", "volatility20", "volume_ratio",
             *list(INDICATORS.values())[:-2]]
@@ -93,22 +96,37 @@ def features_from_ohlcv(bars: pd.DataFrame) -> pd.DataFrame:
     result["ret20"] = close.pct_change(20, fill_method=None) * 100
     result["volatility20"] = result.ret1.rolling(20).std()
     result["volume_ratio"] = data.volume / data.volume.rolling(20).mean().replace(0, np.nan)
-    delta = close.diff()
-    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
-    result["rsi"] = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
-    result.loc[loss.eq(0) & gain.gt(0), "rsi"] = 100
-    result.loc[loss.eq(0) & gain.eq(0), "rsi"] = 50
-    low = data.low.rolling(5).min()
-    high = data.high.rolling(5).max()
+    rsi_period, _rsi_signal = DEFAULT_CHART_ANALYSIS_POLICY.rsi.periods
+    result["rsi"] = exponential_rsi(close, rsi_period)
+    stochastic_period, stochastic_k, _stochastic_d = (
+        DEFAULT_CHART_ANALYSIS_POLICY.stochastic_slow.periods
+    )
+    low = data.low.rolling(stochastic_period).min()
+    high = data.high.rolling(stochastic_period).max()
     fast_k = (close - low) / (high - low).replace(0, np.nan) * 100
-    result["stoch_k"] = fast_k.rolling(3).mean()
-    macd = close.ewm(span=12, adjust=False, min_periods=12).mean() - close.ewm(span=26, adjust=False, min_periods=26).mean()
-    signal = macd.ewm(span=9, adjust=False, min_periods=9).mean()
+    result["stoch_k"] = fast_k.ewm(
+        span=stochastic_k, adjust=False, min_periods=stochastic_k
+    ).mean()
+    macd_fast, macd_slow, macd_signal = (
+        DEFAULT_CHART_ANALYSIS_POLICY.macd_oscillator.periods
+    )
+    macd = (
+        close.ewm(span=macd_fast, adjust=False, min_periods=macd_fast).mean()
+        - close.ewm(span=macd_slow, adjust=False, min_periods=macd_slow).mean()
+    )
+    signal = macd.ewm(
+        span=macd_signal, adjust=False, min_periods=macd_signal
+    ).mean()
     result["macd_pct"] = (macd - signal) / close * 100
-    mid = close.rolling(20).mean()
-    result["bb_z"] = (close - mid) / close.rolling(20).std(ddof=0).replace(0, np.nan)
-    for span in (5, 10, 15, 33, 56, 112, 224, 448):
+    bollinger_period = DEFAULT_CHART_ANALYSIS_POLICY.bollinger.period
+    mid = close.ewm(
+        span=bollinger_period, adjust=False, min_periods=bollinger_period
+    ).mean()
+    result["bb_z"] = (
+        (close - mid)
+        / close.rolling(bollinger_period).std(ddof=0).replace(0, np.nan)
+    )
+    for span in DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods:
         ema = close.ewm(span=span, adjust=False, min_periods=span).mean()
         # Day-on-day change of the moving average itself, percentage points.
         result[f"ema{span}_change_pct"] = ema.pct_change(fill_method=None) * 100

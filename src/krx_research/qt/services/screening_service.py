@@ -7,13 +7,14 @@ from dataclasses import replace
 import numpy as np
 
 from krx_research.qt.models.screen_query import ScreenQuery
-from krx_research.ui.data import WorkstationData, describe_screen_freshness, filter_52w_distance
+from krx_research.qt.services.screen_dataset_service import describe_screen_freshness, filter_52w_distance
+from krx_research.qt.services.ports import ScreeningDataPort
 
 
 class ScreeningService:
     """Application service for screen queries. Qt-free and independently testable."""
 
-    def __init__(self, data: WorkstationData):
+    def __init__(self, data: ScreeningDataPort):
         self._data = data
 
     def available_dates(self, *, quote_venue: str, limit: int = 1000) -> list[dt.date]:

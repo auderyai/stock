@@ -12,14 +12,13 @@ class FeaturedResearchService:
 
     def latest_date(self) -> date | None:
         with FeaturedResearchRepository() as repo:
-            repo.initialize_schema()
             dates = repo.available_dates()
         return max(dates) if dates else None
 
     def query(self, start: date, end: date) -> pd.DataFrame:
         if start > end:
             raise ValueError("시작일은 종료일보다 늦을 수 없습니다.")
-        with FeaturedResearchRepository() as repo:
+        with FeaturedResearchRepository(read_only=False) as repo:
             repo.fill_missing_themes(start, end)
             rows = repo.query(start, end)
         return pd.DataFrame(rows)
@@ -38,5 +37,5 @@ class FeaturedResearchService:
         return self._images.commit(plan)
 
     def refresh_missing(self, start: date, end: date):
-        with FeaturedResearchRepository() as repo:
+        with FeaturedResearchRepository(read_only=False) as repo:
             return repo.refresh_missing(start, end)

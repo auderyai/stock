@@ -6,27 +6,13 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
+from krx_research.qt.models.pattern_queries import PeriodPatternQuery
+
 from .pattern_similarity import PatternRepository, PatternSimilarity, TimeSeriesVectorizer
 from .pattern_policy import (
     LongTermTrendAssessment, LongTermTrendPolicy, PatternQualityPolicy, QualityAssessment,
     RisingWaveAssessment, RisingWavePolicy, TrendAssessment, UptrendPolicy,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class PeriodPatternQuery:
-    security: str
-    start: date
-    end: date
-    top_n: int = 20
-
-    def __post_init__(self) -> None:
-        if not str(self.security).strip():
-            raise ValueError("기준 종목을 입력하십시오.")
-        if self.start >= self.end:
-            raise ValueError("패턴 시작일은 종료일보다 빨라야 합니다.")
-        if not 1 <= self.top_n <= 100:
-            raise ValueError("검색 결과 수는 1~100이어야 합니다.")
 
 
 @dataclass(frozen=True, slots=True)

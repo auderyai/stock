@@ -1,11 +1,11 @@
 from __future__ import annotations
-from krx_research.ui.classic_strategies import assess_classic_strategies
-from krx_research.ui.data import WorkstationData
+from krx_research.analytics.classic_strategies import assess_classic_strategies
+from krx_research.qt.services.ports import ChartDataPort
 
 
 class ChartService:
     """Chart application service; data loading and rule assessments are Qt-free."""
-    def __init__(self, data: WorkstationData):
+    def __init__(self, data: ChartDataPort):
         self._data = data
 
     def resolve(self, ticker_or_name: str) -> str:

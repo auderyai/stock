@@ -22,7 +22,8 @@ class _Repository:
         self.executed: list[str] = []
 
     def period_trade_dates(self, *_args, **_kwargs) -> list[str]:
-        return self.dates
+        start, end = _args[:2]
+        return [day for day in self.dates if start <= day <= end]
 
     def latest_trade_date(self) -> str:
         return self.dates[-1]
@@ -30,10 +31,14 @@ class _Repository:
     def period_dates_with_membership(self, _market: str, dates: list[str]) -> list[str]:
         return dates
 
-    def run(self, query: ScreeningQuery) -> list[ScreeningResult]:
+    def high_52w(self, query: ScreeningQuery) -> list[ScreeningResult]:
         self.executed.append(str(query.as_of_date))
         code = "000660" if len(self.dates) > 1 and query.as_of_date == self.dates[1] else "005930"
         return [ScreeningResult(code, code, "KOSPI", str(query.as_of_date), 100.0)]
+
+    @staticmethod
+    def enrich_display_fields(rows):
+        return rows
 
     def period_stock_metrics(self, codes: list[str], _start: str, _end: str) -> dict:
         return {
@@ -76,6 +81,18 @@ class RepeatedScreeningServiceTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].stock_code, "005930")
         self.assertEqual(rows[0].screen_dates, (dates[0], dates[2]))
+
+    def test_repeated_screen_accepts_nontrading_calendar_boundaries(self) -> None:
+        dates = ["2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12"]
+        repository = _Repository(dates)
+
+        rows = ScreeningService(repository).run_repeated(
+            ScreeningQuery(ScreeningKind.HIGH_52W, 500, "ALL"),
+            DateRange(date(2026, 10, 5), date(2026, 10, 11)),
+        )
+
+        self.assertEqual(repository.executed, dates[:3])
+        self.assertEqual(len(rows), 1)
 
     def test_repeated_screen_requires_two_trade_dates(self) -> None:
         repository = _Repository(["2026-10-16"])

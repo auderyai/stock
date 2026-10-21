@@ -6,7 +6,6 @@ from krx_research.collectors.index_membership import INDEX_GAINER_DEFINITIONS,In
 from krx_research.collectors.ls_index_api import LSIndexClient
 from krx_research.data_engine.config import DataEngineSettings
 from krx_research.data_engine.index_membership_store import PostgreSQLIndexMembershipStore
-from krx_research.data_engine.postgresql import BaseDataRepository
 
 def norm(x): return re.sub(r"[\s_-]+","",str(x)).upper()
 def get_members(client,aliases,expected):
@@ -25,7 +24,7 @@ def get_members(client,aliases,expected):
 
 def main():
     settings=DataEngineSettings.from_environment(); store=PostgreSQLIndexMembershipStore(settings); store.initialize()
-    with BaseDataRepository(settings,application_name="index_membership_date") as repo: day=repo.latest_ohlcv_date() or dt.date.today()
+    day=store.latest_ohlcv_date() or dt.date.today()
     with LSIndexClient(project_root=ROOT) as client:
         for key,d in INDEX_GAINER_DEFINITIONS.items():
             aliases={"KOSPI200","코스피200"} if d.market=="KOSPI" else {"KOSDAQ150","코스닥150"}; code,tickers=get_members(client,aliases,d.expected_count)

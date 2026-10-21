@@ -7,15 +7,15 @@ from PySide6.QtWidgets import QMessageBox
 
 from krx_research.qt.chart_window import ChartWindow
 from krx_research.qt.presentation.error_presenter import user_friendly_error
-from krx_research.qt.services.error_log_service import ErrorLogService
+from krx_research.qt.services.ports import ErrorLogPort
 from krx_research.qt.workers.task_runner import TaskRunner
 
 
 class ResearchArchiveController(QObject):
-    def __init__(self, view, service, chart_service, parent=None):
+    def __init__(self, view, service, chart_service, error_log: ErrorLogPort, parent=None):
         super().__init__(parent or view)
         self.view, self.service, self.chart_service = view, service, chart_service
-        self.runner, self.logs, self.children = TaskRunner(self), ErrorLogService(), []
+        self.runner, self.logs, self.children = TaskRunner(self), error_log, []
         view.queryRequested.connect(self.query)
         view.importRequested.connect(self.import_files)
         view.chartRequested.connect(self.open_chart)

@@ -14,13 +14,16 @@ import pandas as pd
 import requests
 
 from krx_research.application.openai_credentials import OpenAICredentialResolver
+from krx_research.project import STOCK_ROOT
 from krx_research.qt.models.assistant import AssistantReply
+from krx_research.qt.models.pattern_queries import (
+    MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
+)
 from krx_research.qt.services.codex_subscription_backend import CodexSubscriptionBackend
 from krx_research.qt.presentation.column_catalog import label_for
 from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
 from krx_research.qt.services.assistant_workspace import OneOffWorkspace, ReusableCodeLibrary
 from krx_research.qt.services.pattern_similarity import (
-    MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
     PatternSimilaritySearchService, PatternVectorCache,
 )
 from krx_research.qt.repositories.assistant_repository import ReadOnlyDatabaseTool
@@ -74,7 +77,7 @@ class StockFileSearchTool:
 class AssistantService:
     """Responses API orchestration; all local capabilities pass explicit boundaries."""
 
-    def __init__(self, database_target, root: Path = Path(r"C:\stock"), *, session=None,
+    def __init__(self, database_target, root: Path = STOCK_ROOT, *, session=None,
                  provider: str | None = None, codex_backend=None, pattern_service=None):
         credentials = OpenAICredentialResolver(root).load()
         self._api_key = credentials.api_key if credentials else ""

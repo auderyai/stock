@@ -10,10 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from krx_research.analytics.screening import build_repeated_screen_rows
 from krx_research.qt.chart_window import ChartWindow
 from krx_research.qt.windows.workstation_window import WorkstationWindow
 from krx_research.qt.workstation import launch_workstation
-from .data import DAILY_GAINER_SCREEN_TYPES, ScreenDataset
+from krx_research.models.workstation import ScreenDataset
+from krx_research.policies.screen_catalog import DAILY_GAINER_SCREEN_TYPES
 
 WorkstationApp = WorkstationWindow
 
@@ -40,20 +42,6 @@ def build_repeated_screen_export_frame(rows: pd.DataFrame) -> pd.DataFrame:
 
 def export_repeated_screen_to_xlsx(rows: pd.DataFrame, path: str | Path) -> None:
     build_repeated_screen_export_frame(rows).to_excel(Path(path), index=False)
-
-
-def build_repeated_screen_rows(rows: pd.DataFrame, *, minimum_count: int = 2) -> pd.DataFrame:
-    if rows is None or rows.empty or "ticker" not in rows.columns:
-        return pd.DataFrame()
-    frame = rows.copy()
-    group = frame.groupby("ticker", dropna=False)
-    counts = group.size().rename("appearance_count")
-    repeated = frame.merge(counts, left_on="ticker", right_index=True)
-    repeated = repeated.loc[repeated["appearance_count"] >= int(minimum_count)].copy()
-    sort_cols = [c for c in ("appearance_count", "ticker", "screen_date") if c in repeated.columns]
-    if sort_cols:
-        repeated = repeated.sort_values(sort_cols, ascending=[False] + [True] * (len(sort_cols) - 1))
-    return repeated.reset_index(drop=True)
 
 
 def rise_reason_date_for_screen(screen: ScreenDataset | None) -> dt.date | None:

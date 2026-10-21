@@ -12,9 +12,8 @@ from PySide6.QtWidgets import (
 from krx_research.qt.controllers.pattern_search_controller import PatternSearchController
 from krx_research.qt.presentation.column_catalog import label_for
 from krx_research.qt.presentation.pattern_presenter import PatternResultPresenter
-from krx_research.qt.services.box_breakout import PeriodPatternQuery
-from krx_research.qt.services.current_pattern import CurrentPatternKind, CurrentPatternQuery
-from krx_research.qt.services.pattern_similarity import (
+from krx_research.qt.models.pattern_queries import (
+    CurrentPatternKind, CurrentPatternQuery, PeriodPatternQuery,
     MovingAverageKind, MovingAverageSpec, PatternSearchQuery,
 )
 from krx_research.qt.strategies.chart_navigation import SynchronizedChartStrategy

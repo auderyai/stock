@@ -29,7 +29,7 @@ def main() -> int:
     reader = os.getenv("KRX_DB_READ_USER", "").strip() or None
     if reader and not ROLE_NAME.fullmatch(reader):
         raise RuntimeError("KRX_DB_READ_USER에 허용되지 않은 문자가 있습니다.")
-    with ThemeResearchRepository() as repository:
+    with ThemeResearchRepository(read_only=False) as repository:
         repository.initialize_schema(reader_role=reader)
         importer = ThemeSpreadsheetImporter(repository)
         for file_path in args.import_file:

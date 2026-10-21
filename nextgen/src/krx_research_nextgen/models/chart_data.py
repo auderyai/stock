@@ -29,7 +29,7 @@ class StrategyAssessment:
 
 @dataclass(frozen=True)
 class IndicatorConfig:
-    rsi_period: float = float(DEFAULT_CHART_ANALYSIS_POLICY.rsi.periods[0])
+    rsi_period: int = DEFAULT_CHART_ANALYSIS_POLICY.rsi.periods[0]
     rsi_signal: int = DEFAULT_CHART_ANALYSIS_POLICY.rsi.periods[1]
     macd_fast: int = DEFAULT_CHART_ANALYSIS_POLICY.macd_oscillator.periods[0]
     macd_slow: int = DEFAULT_CHART_ANALYSIS_POLICY.macd_oscillator.periods[1]
@@ -40,6 +40,32 @@ class IndicatorConfig:
     stochastic_smooth: int = DEFAULT_CHART_ANALYSIS_POLICY.stochastic_slow.periods[1]
     stochastic_signal: int = DEFAULT_CHART_ANALYSIS_POLICY.stochastic_slow.periods[2]
     ema_windows: tuple[int, ...] = DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods
+
+    def __post_init__(self) -> None:
+        approved = DEFAULT_CHART_ANALYSIS_POLICY
+        actual = (
+            self.rsi_period,
+            self.rsi_signal,
+            self.macd_fast,
+            self.macd_slow,
+            self.macd_signal,
+            self.bollinger_window,
+            self.bollinger_std,
+            self.stochastic_window,
+            self.stochastic_smooth,
+            self.stochastic_signal,
+            self.ema_windows,
+        )
+        expected = (
+            *approved.rsi.periods,
+            *approved.macd_oscillator.periods,
+            approved.bollinger.period,
+            approved.bollinger.deviations,
+            *approved.stochastic_slow.periods,
+            approved.moving_average_periods,
+        )
+        if actual != expected:
+            raise ValueError("차트 지표 설정은 ChartAnalysisPolicy 승인값과 같아야 합니다.")
 
 
 @dataclass(frozen=True)

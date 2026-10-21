@@ -3,24 +3,21 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pandas as pd
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QDateEdit, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QDateEdit, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QMainWindow, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
 
 from krx_research_nextgen.controllers.research_archive_controller import ResearchArchiveController
+from krx_research_nextgen.widgets.result_table import ResultTable
 
 
 class ResearchArchiveWindow(QMainWindow):
     """PyQt6 view over the shared immutable research archive service."""
 
     stock_requested = pyqtSignal(str)
-    _RIGHT = {"source_order", "source_return_pct", "db_return_pct", "source_trading_value_eok",
-              "db_trading_value_eok", "db_close"}
-    _CENTER = {"report_date", "document_kind", "document_ticker", "ticker", "authority"}
-
     def __init__(self, controller: ResearchArchiveController, parent=None):
         super().__init__(parent)
         self._controller = controller
@@ -33,10 +30,7 @@ class ResearchArchiveWindow(QMainWindow):
         controls.addWidget(QLabel("종료일")); self.end = QDateEdit(calendarPopup=True); controls.addWidget(self.end)
         self.search = QLineEdit(); self.search.setPlaceholderText("종목명·코드·제목·사유"); controls.addWidget(self.search, 1)
         query = QPushButton("기간 조회"); query.clicked.connect(self._query); controls.addWidget(query)
-        self.table = QTableWidget(); self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setAlternatingRowColors(True); self.table.verticalHeader().setVisible(False)
-        self.table.itemDoubleClicked.connect(self._chart); layout.addWidget(self.table, 1)
+        self.table = ResultTable(); self.table.chartRequested.connect(self._chart); layout.addWidget(self.table, 1)
         self.status = QLabel("원본값과 Stock DB 확정값을 분리하여 보관합니다."); layout.addWidget(self.status)
         today = date.today(); first = today - timedelta(days=365)
         self.start.setDate(QDate(first.year, first.month, first.day)); self.end.setDate(QDate.currentDate())
@@ -66,23 +60,12 @@ class ResearchArchiveWindow(QMainWindow):
         self._controller.query(start, end, search)
 
     def _show(self, frame: pd.DataFrame) -> None:
-        self.table.clear(); self.table.setRowCount(len(frame)); self.table.setColumnCount(len(frame.columns))
-        self.table.setHorizontalHeaderLabels([str(column) for column in frame.columns])
-        for column in range(self.table.columnCount()):
-            self.table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        for row, values in enumerate(frame.itertuples(index=False, name=None)):
-            for column, value in enumerate(values):
-                name = str(frame.columns[column]); item = QTableWidgetItem("" if pd.isna(value) else str(value))
-                alignment = (Qt.AlignmentFlag.AlignRight if name in self._RIGHT else
-                             Qt.AlignmentFlag.AlignCenter if name in self._CENTER else Qt.AlignmentFlag.AlignLeft)
-                item.setTextAlignment(alignment | Qt.AlignmentFlag.AlignVCenter); self.table.setItem(row, column, item)
-        self.table.resizeColumnsToContents(); self.status.setText(f"연구자료 {len(frame):,}건 · Stock DB 값 우선")
+        self.table.set_frame(frame)
+        self.status.setText(f"연구자료 {len(frame):,}건 · Stock DB 값 우선")
 
     def _chart(self) -> None:
-        columns = [self.table.horizontalHeaderItem(i).text() for i in range(self.table.columnCount())]
-        if "ticker" not in columns or self.table.currentRow() < 0: return
-        item = self.table.item(self.table.currentRow(), columns.index("ticker"))
-        if item and item.text(): self.stock_requested.emit(item.text())
+        ticker = self.table.current_ticker()
+        if ticker: self.stock_requested.emit(ticker)
 
     def _error(self, operation: str, exception: str, path: str) -> None:
         prefix = "등록 실패 · 원본은 보관되지 않았습니다.\n" if operation == "import" else ""

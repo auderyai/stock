@@ -19,6 +19,7 @@ DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
 ROOT_FOLDER_NAME = "stock-cloud"
+DEFAULT_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -71,6 +72,33 @@ class DesktopOAuthClient:
         if not client.client_id.endswith(".apps.googleusercontent.com"):
             raise GoogleDriveSetupError("Google Desktop OAuth client_id 형식이 아닙니다.")
         return client
+
+    @classmethod
+    def from_stored(cls, document: dict[str, Any]) -> "DesktopOAuthClient":
+        client = cls(
+            client_id=str(document.get("client_id", "")).strip(),
+            client_secret=str(document.get("client_secret", "")).strip(),
+            auth_uri=DEFAULT_AUTH_URI,
+            token_uri=str(document.get("token_uri", "")).strip(),
+        )
+        if not all((client.client_id, client.client_secret, client.token_uri)):
+            raise GoogleDriveSetupError(
+                "OAuth JSON과 기존 암호화 자격증명에서 Google client 정보를 찾지 못했습니다."
+            )
+        if not client.client_id.endswith(".apps.googleusercontent.com"):
+            raise GoogleDriveSetupError("저장된 Google Desktop OAuth client_id 형식이 아닙니다.")
+        return client
+
+    def flow_config(self) -> dict[str, dict[str, object]]:
+        return {
+            "installed": {
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "auth_uri": self.auth_uri,
+                "token_uri": self.token_uri,
+                "redirect_uris": ["http://localhost"],
+            }
+        }
 
 
 class DriveApi:
@@ -177,7 +205,16 @@ class GoogleDriveOAuthSetup:
         self._token_store = WindowsDpapiJsonStore(token_path)
 
     def validate_client(self) -> DesktopOAuthClient:
-        return DesktopOAuthClient.load(self._client_path)
+        if self._client_path.is_file():
+            return DesktopOAuthClient.load(self._client_path)
+        try:
+            return DesktopOAuthClient.from_stored(self._token_store.load())
+        except GoogleDriveSetupError:
+            raise
+        except Exception as exc:
+            raise GoogleDriveSetupError(
+                "OAuth JSON이 없고 기존 암호화 자격증명도 읽을 수 없습니다."
+            ) from exc
 
     def run(self) -> Path:
         client = self.validate_client()
@@ -188,8 +225,8 @@ class GoogleDriveOAuthSetup:
                 "Google OAuth 라이브러리가 없습니다. CMD 실행 파일로 다시 시작하십시오."
             ) from exc
 
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(self._client_path), scopes=[DRIVE_FILE_SCOPE]
+        flow = InstalledAppFlow.from_client_config(
+            client.flow_config(), scopes=[DRIVE_FILE_SCOPE]
         )
         credentials = flow.run_local_server(
             host="localhost",
@@ -210,7 +247,11 @@ class GoogleDriveOAuthSetup:
         drive = DriveApi(credentials.token)
         folder_id = drive.ensure_root_folder()
         drive.verify_round_trip(folder_id)
-        self._token_store.save(
+        try:
+            document = self._token_store.load()
+        except Exception:
+            document = {}
+        document.update(
             {
                 "client_id": client.client_id,
                 "client_secret": client.client_secret,
@@ -220,6 +261,7 @@ class GoogleDriveOAuthSetup:
                 "root_folder_id": folder_id,
             }
         )
+        self._token_store.save(document)
         return self._token_store.path
 
     def verify_stored(self) -> None:

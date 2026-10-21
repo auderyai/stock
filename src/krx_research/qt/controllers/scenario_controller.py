@@ -4,19 +4,19 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMessageBox
 
 from krx_research.qt.presentation.error_presenter import user_friendly_error
-from krx_research.qt.services.error_log_service import ErrorLogService
+from krx_research.qt.services.ports import ErrorLogPort
 from krx_research.qt.workers.task_runner import TaskRunner
 
 
 class ScenarioController(QObject):
     """Coordinates scenario inputs, async calculation and PySide6 presentation."""
 
-    def __init__(self, view, service, parent=None):
+    def __init__(self, view, service, error_log: ErrorLogPort, parent=None):
         super().__init__(parent or view)
         self.view = view
         self.service = service
         self.runner = TaskRunner(self)
-        self.error_log = ErrorLogService()
+        self.error_log = error_log
         view.runRequested.connect(self.run)
         view.indicatorViewRequested.connect(self.view.show_indicator)
 

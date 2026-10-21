@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-ROOT = Path(r"C:\stock")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from krx_research.infrastructure.xing_db.adaptive_raw_bridge import AdaptiveRawTrBridge

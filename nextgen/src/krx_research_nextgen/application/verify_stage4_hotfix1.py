@@ -10,7 +10,9 @@ from krx_research_nextgen.repositories.screening_repository import ScreeningRepo
 from krx_research_nextgen.repositories.security_repository import SecurityRepository
 from krx_research_nextgen.services.market_chart_service import MarketChartService
 from krx_research_nextgen.services.screening_service import ScreeningService
+from krx_research_nextgen.services.screening_export_service import ScreeningExportService
 from krx_research_nextgen.services.security_search_service import SecuritySearchService
+from krx_research_nextgen.services.scenario_service import ScenarioService
 
 
 def main() -> int:
@@ -22,9 +24,10 @@ def main() -> int:
         main_controller = MainWindowController(
             SecuritySearchService(security_repo),
             MarketChartService(chart_repo),
+            ScenarioService(),
         )
         screening_controller = ScreeningController(
-            ScreeningService(screening_repo)
+            ScreeningService(screening_repo), ScreeningExportService()
         )
 
         print("STAGE4_HOTFIX1_VERIFY:")
@@ -38,7 +41,7 @@ def main() -> int:
                 if len(bundle.frame) < 80:
                     raise RuntimeError(f"Too few chart rows for {kind.value}")
 
-        log_root = Path(r"C:\stock\logs\tasks")
+        log_root = Path(__file__).resolve().parents[4] / "logs" / "tasks"
         logs = list(log_root.rglob("*.log")) if log_root.exists() else []
         if not logs:
             raise RuntimeError("Per-task log files were not created.")

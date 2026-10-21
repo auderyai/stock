@@ -6,9 +6,9 @@ from typing import Any, Protocol, Sequence
 import pandas as pd
 
 from .cache import TTLCache
-from .indicators import IndicatorOptions, calculate_indicators, volume_profile
-from .investor import aggregate_investor_flow, normalize_investor_code, pivot_net_flow
-from .timeframes import Timeframe, resample_ohlcv
+from krx_research.analytics.indicators import IndicatorOptions, calculate_indicators, volume_profile
+from krx_research.analytics.investor import aggregate_investor_flow, normalize_investor_code, pivot_net_flow
+from krx_research.analytics.timeframes import Timeframe, resample_ohlcv
 
 
 class ReadRepository(Protocol):

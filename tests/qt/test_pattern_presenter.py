@@ -34,6 +34,18 @@ class PatternResultPresenterTests(unittest.TestCase):
         model.sort(0, Qt.DescendingOrder)
         self.assertEqual(model.frame.value.tolist(), [10, 2, 1])
 
+    def test_common_model_resets_rank_order_with_ticker_tie_breaker(self):
+        model = DataFrameModel(pd.DataFrame([
+            {"rank": 2, "stock_code": "005930"},
+            {"rank": 1, "stock_code": "035420"},
+            {"rank": 1, "stock_code": "000660"},
+        ]))
+
+        model.apply_default_sort()
+
+        self.assertEqual(model.frame["rank"].tolist(), [1, 1, 2])
+        self.assertEqual(model.frame["stock_code"].tolist(), ["000660", "035420", "005930"])
+
     def test_current_patterns_are_ranked_by_structure_score(self):
         rows = [
             {"stock_code": "2", "stock_name": "둘", "pattern_score": 80},

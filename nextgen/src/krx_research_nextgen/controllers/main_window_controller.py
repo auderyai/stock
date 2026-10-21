@@ -13,11 +13,11 @@ class MainWindowController:
         self,
         security_search: SecuritySearchService,
         market_chart: MarketChartService,
-        scenario: ScenarioService | None = None,
+        scenario: ScenarioService,
     ) -> None:
         self._security_search = security_search
         self._market_chart = market_chart
-        self._scenario = scenario or ScenarioService()
+        self._scenario = scenario
         self._search_lock, self._chart_lock = RLock(), RLock()
 
     def search_securities(self, keyword: str, limit: int = 300) -> list[SecurityRecord]:
@@ -27,7 +27,7 @@ class MainWindowController:
     def prepare_chart(self, stock_code: str, limit: int = 550, timeframe: str = "D") -> ChartBundle:
         with self._chart_lock:
             return self._market_chart.prepare_recent_chart(
-                stock_code, limit=limit, config=IndicatorConfig(rsi_period=14.0), timeframe=timeframe,
+                stock_code, limit=limit, config=IndicatorConfig(), timeframe=timeframe,
             )
 
     def status(self) -> dict[str, object]:

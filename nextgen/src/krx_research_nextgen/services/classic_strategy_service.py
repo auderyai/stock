@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 from krx_research_nextgen.models.chart_data import StrategyAssessment
 
 
@@ -27,9 +28,17 @@ class ClassicStrategyService:
                  daily.high.ge(daily[["open", "low", "close"]].max(axis=1)) &
                  daily.low.le(daily[["open", "high", "close"]].min(axis=1)))
         daily = daily.loc[valid]; close = daily.close.astype(float)
-        low5, high5 = daily.low.rolling(5).min(), daily.high.rolling(5).max()
+        period, smooth_k, smooth_d = (
+            DEFAULT_CHART_ANALYSIS_POLICY.stochastic_slow.periods
+        )
+        low5, high5 = daily.low.rolling(period).min(), daily.high.rolling(period).max()
         fast = (close - low5) / (high5 - low5).replace(0, np.nan) * 100
-        daily["slow_k"], daily["slow_d"] = fast.rolling(3).mean(), fast.rolling(3).mean().rolling(3).mean()
+        daily["slow_k"] = fast.ewm(
+            span=smooth_k, adjust=False, min_periods=smooth_k
+        ).mean()
+        daily["slow_d"] = daily["slow_k"].ewm(
+            span=smooth_d, adjust=False, min_periods=smooth_d
+        ).mean()
         return daily
 
     @staticmethod
@@ -223,8 +232,14 @@ class ClassicStrategyService:
         if len(daily) < 2: return self._item(name, "자료부족", "일봉 자료가 부족합니다.")
         weekly = daily.assign(actual_date=daily.index).groupby(daily.index.to_period("W-FRI"), sort=True).agg(close=("close", "last"), actual_date=("actual_date", "last"))
         weekly.index = pd.DatetimeIndex(weekly.actual_date); close = weekly.close.astype(float)
-        macd = close.ewm(span=12, adjust=False, min_periods=12).mean() - close.ewm(span=26, adjust=False, min_periods=26).mean()
-        histogram = (macd - macd.ewm(span=9, adjust=False, min_periods=9).mean()).dropna()
+        fast, slow, signal = DEFAULT_CHART_ANALYSIS_POLICY.macd_oscillator.periods
+        macd = (
+            close.ewm(span=fast, adjust=False, min_periods=fast).mean()
+            - close.ewm(span=slow, adjust=False, min_periods=slow).mean()
+        )
+        histogram = (
+            macd - macd.ewm(span=signal, adjust=False, min_periods=signal).mean()
+        ).dropna()
         stochastic = daily[["slow_k", "slow_d"]].dropna()
         if len(histogram) < 2 or len(stochastic) < 1: return self._item(name, "자료부족", "완성된 주봉 MACD-Histogram과 일봉 Slow Stochastic 자료가 부족합니다.")
         prior_hist, current_hist = float(histogram.iloc[-2]), float(histogram.iloc[-1])

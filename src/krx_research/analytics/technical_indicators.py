@@ -38,6 +38,17 @@ def _nullable_flag(condition: Series, available: Series) -> Series:
     return result
 
 
+def exponential_moving_average(close: Series, period: int) -> Series:
+    """Return the repository-standard EMA without database side effects."""
+    if period < 1:
+        raise ValueError("EMA period must be at least 1")
+    return pd.to_numeric(close, errors="coerce").astype("float64").ewm(
+        span=period,
+        adjust=False,
+        min_periods=period,
+    ).mean()
+
+
 def _normalized_ohlcv(frame: DataFrame, ticker: object | None) -> tuple[str, DataFrame]:
     if frame.empty:
         raise ValueError("OHLCV history is empty")
@@ -98,11 +109,7 @@ def _daily_indicators(code: str, work: DataFrame, calculated_at: str) -> DataFra
     for window in EMA_WINDOWS:
         column = f"ema_{window}"
         ema_columns.append(column)
-        daily[column] = work["close"].ewm(
-            span=window,
-            adjust=False,
-            min_periods=window,
-        ).mean()
+        daily[column] = exponential_moving_average(work["close"], window)
 
     prior_high = work["high"].shift(1).rolling(
         TRADING_DAYS_52W,

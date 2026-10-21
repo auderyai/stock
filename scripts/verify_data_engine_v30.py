@@ -16,7 +16,9 @@ from krx_research.data_engine.service import MarketDataService
 def main() -> int:
     settings = DataEngineSettings.from_environment()
     settings.validate()
-    with BaseDataRepository(settings, application_name="krx_v30_verify") as repository:
+    with BaseDataRepository(
+        settings, application_name="krx_v30_verify", read_only=False
+    ) as repository:
         repository.initialize_schema()
         database = repository.database_identity()
         if not database["ohlcv_exists"]:

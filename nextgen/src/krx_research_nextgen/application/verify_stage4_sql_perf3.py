@@ -8,6 +8,7 @@ from krx_research_nextgen.infrastructure.task_logging import TaskLog
 from krx_research_nextgen.models.screening import ScreeningKind
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
 from krx_research_nextgen.services.screening_service import ScreeningService
+from krx_research_nextgen.services.screening_export_service import ScreeningExportService
 
 
 def run_pass(controller, repo, label: str) -> None:
@@ -53,7 +54,7 @@ def main() -> int:
         try:
             with ScreeningRepository() as repo:
                 service = ScreeningService(repo)
-                controller = ScreeningController(service)
+                controller = ScreeningController(service, ScreeningExportService())
 
                 run_pass(controller, repo, "COLD_PASS")
                 run_pass(controller, repo, "WARM_PASS")

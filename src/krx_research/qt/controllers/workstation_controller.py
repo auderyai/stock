@@ -11,7 +11,7 @@ from krx_research.qt.models.date_range import DateRange
 from krx_research.qt.presentation.error_presenter import user_friendly_error
 from krx_research.qt.presentation.screen_presenter import ScreenResultPresenter
 from krx_research.qt.services.chart_service import ChartService
-from krx_research.qt.services.error_log_service import ErrorLogService
+from krx_research.qt.services.ports import ErrorLogPort
 from krx_research.qt.services.export_service import ExcelExportService
 from krx_research.qt.services.screening_service import ScreeningService
 from krx_research.qt.services.security_search_service import SecuritySearchService
@@ -33,6 +33,7 @@ class WorkstationController(QObject):
         security_search: SecuritySearchService,
         window_factory,
         assistant: AssistantService,
+        error_log: ErrorLogPort,
         parent=None,
     ):
         super().__init__(parent or view)
@@ -44,7 +45,7 @@ class WorkstationController(QObject):
         self.window_factory = window_factory
         self.assistant = assistant
         self.presenter = ScreenResultPresenter()
-        self.error_log = ErrorLogService()
+        self.error_log = error_log
         self.state = WorkstationState()
         self.runner = TaskRunner(self)
         self._display_frame = None

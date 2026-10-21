@@ -57,7 +57,7 @@ def main() -> int:
     layout = ArchiveLayout(project_root)
     layout.ensure()
     database_target = resolve_database_target(project_root)
-    with open_research_store(database_target) as store:
+    with open_research_store(database_target, read_only=False) as store:
         resolved_date = store.latest_technical_indicator_date(args.as_of)
         if resolved_date is None:
             result = {

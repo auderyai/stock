@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from krx_research.project import STOCK_ROOT
+
 
 @dataclass(frozen=True)
 class LogPaths:
-    """Single source of truth for every C:/stock log path."""
+    """Single source of truth for every project log path."""
 
-    root: Path = Path(r"C:\stock")
+    root: Path = STOCK_ROOT
 
     @property
     def logs(self) -> Path:

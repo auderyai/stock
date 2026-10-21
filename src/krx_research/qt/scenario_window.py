@@ -1,20 +1,14 @@
 """Compatibility facade for the layered PySide6 indicator-scenario window."""
 from __future__ import annotations
 
-from krx_research.database.scenario_market import ScenarioMarketRepository
-from krx_research.qt.controllers.scenario_controller import ScenarioController
-from krx_research.qt.services.scenario_service import ScenarioService
+from krx_research.qt.application.scenario_factory import scenario_controller
 from krx_research.qt.windows.scenario_window import ScenarioWindow as _ScenarioView
 
 
 class ScenarioWindow(_ScenarioView):
     def __init__(self, daily, ticker: str = "", market: str = "", parent=None):
         super().__init__(daily, ticker, market, parent)
-        self.controller = ScenarioController(
-            self,
-            ScenarioService(ScenarioMarketRepository()),
-            parent=self,
-        )
+        self.controller = scenario_controller(self)
         self.controller.initialize()
 
 

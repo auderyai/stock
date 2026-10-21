@@ -13,7 +13,7 @@ def main() -> int:
         bundle = service.prepare_recent_chart(
             symbol,
             limit=180,
-            config=IndicatorConfig(rsi_period=14.9),
+            config=IndicatorConfig(),
         )
 
         frame = bundle.frame
@@ -44,7 +44,7 @@ def main() -> int:
         print(f" - real rows: {len(frame)}")
         print(f" - first date: {frame.index.min().date()}")
         print(f" - last date: {frame.index.max().date()}")
-        print(" - RSI 14.9: PASS")
+        print(" - RSI EMA 14, signal EMA 9: PASS")
         print(" - MACD: PASS")
         print(" - Bollinger: PASS")
         print(" - Controller -> Service -> Repository: PASS")

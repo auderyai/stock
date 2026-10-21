@@ -4,13 +4,13 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QDialog, QMessageBox
 from krx_research.qt.chart_window import ChartWindow
 from krx_research.qt.presentation.error_presenter import user_friendly_error
-from krx_research.qt.services.error_log_service import ErrorLogService
+from krx_research.qt.services.ports import ErrorLogPort
 from krx_research.qt.workers.task_runner import TaskRunner
 
 
 class FeaturedResearchController(QObject):
-    def __init__(self, view, service, chart_data, parent=None):
-        super().__init__(parent or view); self.view=view; self.service=service; self.chart_data=chart_data; self.runner=TaskRunner(self); self.logs=ErrorLogService(); self.children=[]
+    def __init__(self, view, service, chart_data, error_log: ErrorLogPort, parent=None):
+        super().__init__(parent or view); self.view=view; self.service=service; self.chart_data=chart_data; self.runner=TaskRunner(self); self.logs=error_log; self.children=[]
         view.queryRequested.connect(self.query); view.repeatedRequested.connect(self.repeated); view.refreshRequested.connect(self.refresh); view.importRequested.connect(self.import_images); view.chartRequested.connect(self.open_chart)
     def initialize(self):
         try: d=self.service.latest_date() or date.today(); self.view.set_date(d); self.query(d,d) if self.service.latest_date() else None

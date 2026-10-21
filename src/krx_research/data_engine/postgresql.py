@@ -23,14 +23,14 @@ except ImportError:  # Allows pure calculation modules/tests without a DB driver
 
 from .config import DataEngineSettings
 from .core_schema import CoreSchemaMigrator
-from .investor import (
+from krx_research.analytics.investor import (
     FOREIGN_MEMBERS,
     INSTITUTION_MEMBERS,
     LEAF_INVESTORS,
     normalize_investor_code,
 )
 from .models import DataCoverage
-from .timeframes import normalize_ohlcv
+from krx_research.analytics.timeframes import normalize_ohlcv
 
 
 _OHLCV_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
@@ -152,6 +152,7 @@ class BaseDataRepository(AbstractContextManager["BaseDataRepository"]):
         *,
         conninfo: str | None = None,
         application_name: str = "krx_data_engine_v30",
+        read_only: bool = True,
     ) -> None:
         if psycopg is None:
             raise RuntimeError("psycopg가 설치되지 않았습니다. requirements-data-engine-v30.txt를 설치하십시오.")
@@ -163,6 +164,9 @@ class BaseDataRepository(AbstractContextManager["BaseDataRepository"]):
             application_name=application_name,
             autocommit=True,
         )
+        self.read_only = bool(read_only)
+        if self.read_only:
+            self.conn.execute("SET default_transaction_read_only TO on")
         self._ohlcv_schema_name, self._ohlcv_table_name = self._resolve_relation(
             self.settings.ohlcv_schema,
             (self.settings.ohlcv_table,),

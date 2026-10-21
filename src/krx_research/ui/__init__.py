@@ -11,7 +11,7 @@ _EXPORTS = {
     **{name: (".charts", name) for name in (
         "DEFAULT_PROFILE_BINS", "MAX_PROFILE_BINS", "MIN_PROFILE_BINS", "build_chart_figure",
     )},
-    **{name: (".classic_strategies", name) for name in (
+    **{name: ("krx_research.analytics.classic_strategies", name) for name in (
         "ALEXANDER_ELDER", "ALL_STRATEGIES", "ELLIOTT_WAVE", "JESSE_LIVERMORE",
         "STRATEGY_OPTIONS", "ClassicStrategyAssessment", "assess_classic_strategies",
         "format_strategy_assessments",

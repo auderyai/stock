@@ -5,6 +5,10 @@ from datetime import date
 from enum import Enum
 
 
+CORE_INDEX_UNIVERSE = "KOSPI200+KOSDAQ150"
+BOLLINGER_UNIVERSE = CORE_INDEX_UNIVERSE
+
+
 class ScreeningKind(str, Enum):
     EMA_SIMILARITY = "이동평균 유사배열"
     HIGH_52W = "52주 신고가"
@@ -17,6 +21,7 @@ class ScreeningKind(str, Enum):
     TURNOVER_TOP = "거래대금 TOP"
     WEEKLY_TURNOVER_TOP = "주간 거래대금 TOP"
     EMA20_LEADING_SECTOR = "20일선+주도섹터"
+    EMA_BEARISH_ALIGNMENT_BREAKOUT = "기간 EMA15>EMA10>EMA5 + 최신 종가>EMA15"
 
 
 @dataclass(frozen=True)

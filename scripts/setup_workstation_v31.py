@@ -6,7 +6,7 @@ import os
 import re
 
 from krx_research.data_engine.config import DataEngineSettings, load_environment
-from krx_research.data_engine.postgresql import BaseDataRepository
+from krx_research.database.administrative_repository import AdministrativeRepository
 
 
 ROLE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
@@ -19,29 +19,12 @@ def main() -> int:
         raise RuntimeError(".env에 KRX_DB_READ_USER가 없습니다.")
     if not ROLE_NAME.fullmatch(reader):
         raise RuntimeError("KRX_DB_READ_USER에 허용되지 않은 문자가 있습니다.")
-    try:
-        from psycopg import sql
-    except ImportError as error:
-        raise RuntimeError("psycopg가 설치되지 않았습니다.") from error
-
-    with BaseDataRepository(DataEngineSettings.from_environment()) as repository:
-        role = sql.Identifier(reader)
-        with repository.conn.transaction():
-            repository.conn.execute(
-                sql.SQL("GRANT USAGE ON SCHEMA market, market_core TO {}").format(role)
-            )
-            repository.conn.execute(
-                sql.SQL(
-                    "GRANT SELECT ON ALL TABLES IN SCHEMA market, market_core TO {}"
-                ).format(role)
-            )
-            repository.conn.execute(
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA market_core "
-                    "GRANT SELECT ON TABLES TO {}"
-                ).format(role)
-            )
-        identity = repository.database_identity()
+    with AdministrativeRepository(
+        DataEngineSettings.from_environment(),
+        application_name="setup_workstation",
+        read_only=False,
+    ) as repository:
+        identity = repository.grant_reader(reader)
     print(
         "workstation v31 DB 준비 완료: "
         f"reader={reader}, ohlcv={identity['ohlcv_relation']}, "

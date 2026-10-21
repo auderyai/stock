@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 from pathlib import Path
 import subprocess
@@ -52,21 +53,34 @@ def _verify_remote() -> None:
         raise SecretRegistrationError("Git 원격 저장소가 auderyai/stock이 아닙니다.")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="DPAPI 자격증명을 GitHub Actions Secrets에 암호화 등록"
+    )
+    parser.add_argument(
+        "--drive-only",
+        action="store_true",
+        help="Google Drive 관련 비밀값만 갱신",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
     _verify_remote()
     drive = DriveCredentials.from_windows_store(
         ROOT / "config" / "google_drive_oauth.dpapi"
     )
-    ls_key, ls_secret = load_ls_credentials(ROOT)
     values = {
         "GOOGLE_CLIENT_ID": drive.client_id,
         "GOOGLE_CLIENT_SECRET": drive.client_secret,
         "GOOGLE_REFRESH_TOKEN": drive.refresh_token,
         "GOOGLE_DRIVE_FOLDER_ID": drive.root_folder_id,
         "DRIVE_ARCHIVE_KEY": drive.archive_key,
-        "LS_APP_KEY": ls_key,
-        "LS_APP_SECRET": ls_secret,
     }
+    if not args.drive_only:
+        ls_key, ls_secret = load_ls_credentials(ROOT)
+        values.update({"LS_APP_KEY": ls_key, "LS_APP_SECRET": ls_secret})
     session = requests.Session()
     session.headers.update(
         {

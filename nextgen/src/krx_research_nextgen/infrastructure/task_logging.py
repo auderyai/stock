@@ -6,12 +6,11 @@ import threading
 import traceback
 from contextlib import AbstractContextManager
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
+from krx_research_nextgen.infrastructure.log_paths import LOG_PATHS
 
-ROOT = Path(r"C:\stock")
-TASK_LOG_ROOT = ROOT / "logs" / "tasks"
+TASK_LOG_ROOT = LOG_PATHS.tasks
 
 
 def _safe_name(value: str) -> str:

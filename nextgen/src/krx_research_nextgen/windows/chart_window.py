@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import pandas as pd
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
-    QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
+    QPushButton, QSpinBox, QSplitter,
     QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -11,6 +12,7 @@ from krx_research_nextgen.models.chart_data import ChartBundle, STRATEGY_OPTIONS
 from krx_research_nextgen.models.screening import ScreeningResult
 from krx_research_nextgen.presentation.embedded_finplot_widget import EmbeddedFinplotWidget
 from krx_research_nextgen.presentation.screening_table import HEADERS, row_values
+from krx_research_nextgen.widgets.result_table import ResultTable
 
 
 class ChartWindow(QMainWindow):
@@ -64,14 +66,8 @@ class ChartWindow(QMainWindow):
 
         nav = QWidget(); nav_layout = QVBoxLayout(nav)
         title = QLabel("조회 결과 종목"); title.setStyleSheet("font-size:14px;font-weight:700"); nav_layout.addWidget(title)
-        self.navigation = QTableWidget(0, len(HEADERS) - 1)
-        self.navigation.setHorizontalHeaderLabels(HEADERS[1:])
-        self.navigation.verticalHeader().setVisible(False)
-        self.navigation.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.navigation.horizontalHeader().setSectionsMovable(True)
-        for col in range(self.navigation.columnCount()):
-            self.navigation.horizontalHeaderItem(col).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.navigation.itemSelectionChanged.connect(self._navigate); nav_layout.addWidget(self.navigation, 1)
+        self.navigation = ResultTable()
+        self.navigation.currentTickerChanged.connect(self._navigate); nav_layout.addWidget(self.navigation, 1)
         self.splitter.addWidget(nav); nav.setVisible(navigation)
         self.splitter.setOpaqueResize(True)
         self.splitter.setSizes([1360, 320] if navigation else [1680, 0])
@@ -97,34 +93,22 @@ class ChartWindow(QMainWindow):
                                  selected)
 
     def set_navigation_data(self, headers, items, selected: str, alignments=None) -> None:
-        self._guard = True; self.navigation.setColumnCount(len(headers)); self.navigation.setHorizontalHeaderLabels(headers)
-        for column in range(self.navigation.columnCount()):
-            self.navigation.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.navigation.setRowCount(len(items))
-        for row, entry in enumerate(items):
-            values = entry["values"]
-            for col, value in enumerate(values):
-                cell = QTableWidgetItem(str(value))
-                if alignments:
-                    alignment = {"center": Qt.AlignmentFlag.AlignCenter,
-                                 "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                                 "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter}[alignments[col]]
-                else:
-                    alignment = (Qt.AlignmentFlag.AlignCenter if col == 1 else
-                                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter if col in (0, 4, 5, 6, 7, 8, 9, 10, 11, 13) else
-                                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                cell.setTextAlignment(alignment)
-                self.navigation.setItem(row, col, cell)
-            self.navigation.item(row, 0).setData(Qt.ItemDataRole.UserRole, str(entry["code"]))
-            if str(entry["code"]) == selected: self.navigation.selectRow(row)
+        self._guard = True
+        fields = [f"value_{index}" for index in range(len(headers))]
+        frame = pd.DataFrame(
+            ({"ticker": str(entry["code"]), **dict(zip(fields, entry["values"], strict=True))}
+             for entry in items),
+            columns=("ticker", *fields),
+        )
+        self.navigation.set_frame(frame, labels={**{"ticker": "종목코드"}, **dict(zip(fields, headers, strict=True))})
+        self.navigation.setColumnHidden(0, True)
+        if selected:
+            matches = self.navigation.frame.index[self.navigation.frame["ticker"].astype(str) == str(selected)]
+            if len(matches): self.navigation.selectRow(int(matches[0]))
         self._guard = False
-        self.navigation.resizeColumnsToContents()
 
-    def _navigate(self) -> None:
-        if self._guard or self.navigation.currentRow() < 0: return
-        first = self.navigation.item(self.navigation.currentRow(), 0)
-        code = first.data(Qt.ItemDataRole.UserRole) if first else None
-        if code: self.ticker_changed.emit(str(code))
+    def _navigate(self, code: str) -> None:
+        if not self._guard and code: self.ticker_changed.emit(code)
 
     def _reload(self) -> None:
         if self._code:

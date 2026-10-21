@@ -5,9 +5,9 @@ from typing import Any
 
 import pandas as pd
 
-from krx_research.data_engine.investor import FOREIGN_MEMBERS, INSTITUTION_MEMBERS
+from krx_research.analytics.investor import FOREIGN_MEMBERS, INSTITUTION_MEMBERS
 from krx_research.qt.models.investor_dashboard import InvestorDashboardData
-from krx_research.ui.data import build_investor_flow_rows
+from krx_research.analytics.screening import build_investor_flow_rows
 
 INVESTOR_CODES = {
     "foreign": FOREIGN_MEMBERS,

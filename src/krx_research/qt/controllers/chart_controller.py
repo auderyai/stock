@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMessageBox
 
 from krx_research.qt.presentation.error_presenter import user_friendly_error
-from krx_research.qt.services.error_log_service import ErrorLogService
+from krx_research.qt.services.ports import ErrorLogPort
 from krx_research.qt.workers.task_runner import TaskRunner
 from krx_research.qt.scenario_window import open_scenario_window
 
@@ -12,12 +12,12 @@ from krx_research.qt.scenario_window import open_scenario_window
 class ChartController(QObject):
     """Coordinates asynchronous chart loading and synchronized list navigation."""
 
-    def __init__(self, view, chart_service, parent=None):
+    def __init__(self, view, chart_service, error_log: ErrorLogPort, parent=None):
         super().__init__(parent or view)
         self.view = view
         self.chart_service = chart_service
         self.runner = TaskRunner(self)
-        self.error_log = ErrorLogService()
+        self.error_log = error_log
         self.dataset = None
         self._loading_ticker: str | None = None
         view.reloadRequested.connect(self.load)

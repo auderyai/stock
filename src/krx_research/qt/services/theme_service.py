@@ -12,7 +12,6 @@ class ThemeResearchService:
 
     def latest_date(self) -> date | None:
         with ThemeResearchRepository() as repo:
-            repo.initialize_schema()
             dates = repo.available_dates()
         return max(dates) if dates else None
 
@@ -20,7 +19,6 @@ class ThemeResearchService:
         if start > end:
             raise ValueError("시작일은 종료일보다 늦을 수 없습니다.")
         with ThemeResearchRepository() as repo:
-            repo.initialize_schema()
             rows = repo.query(start, end)
         return pd.DataFrame(rows)
 
@@ -31,5 +29,5 @@ class ThemeResearchService:
         return self._images.commit(plan)
 
     def refresh(self, start: date, end: date):
-        with ThemeResearchRepository() as repo:
+        with ThemeResearchRepository(read_only=False) as repo:
             return repo.refresh_trading_values(start, end)

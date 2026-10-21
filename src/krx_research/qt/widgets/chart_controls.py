@@ -8,8 +8,12 @@ from PySide6.QtWidgets import (
 
 from krx_research.ui.chart_options import ChartDisplayOptions
 from krx_research.ui.charts import DEFAULT_PROFILE_BINS, MAX_PROFILE_BINS, MIN_PROFILE_BINS
-from krx_research.ui.classic_strategies import ALL_STRATEGIES, STRATEGY_OPTIONS, format_strategy_assessments
-from krx_research.ui.on_demand import TIMEFRAME_LABELS
+from krx_research.analytics.classic_strategies import (
+    ALL_STRATEGIES,
+    STRATEGY_OPTIONS,
+    format_strategy_assessments,
+)
+from krx_research.policies.workstation_options import TIMEFRAME_LABELS
 
 
 class ChartControlPanel(QGroupBox):

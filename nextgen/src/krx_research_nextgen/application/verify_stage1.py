@@ -30,29 +30,24 @@ def main() -> int:
     frame = build_sample_ohlcv()
     service = ChartService()
 
-    integer = service.prepare("INT-RSI", frame, IndicatorConfig(rsi_period=14))
-    fractional = service.prepare("FRAC-RSI", frame, IndicatorConfig(rsi_period=14.9))
+    approved = service.prepare("APPROVED-INDICATORS", frame, IndicatorConfig())
 
     required = {
         "rsi", "macd", "macd_signal", "macd_hist",
         "bb_mid", "bb_upper", "bb_lower",
     }
-    missing = required.difference(integer.frame.columns)
+    missing = required.difference(approved.frame.columns)
     if missing:
         raise RuntimeError(f"indicator columns missing: {sorted(missing)}")
 
     for col in required:
-        if integer.frame[col].notna().sum() == 0:
+        if approved.frame[col].notna().sum() == 0:
             raise RuntimeError(f"indicator produced no numeric values: {col}")
-
-    if fractional.frame["rsi"].notna().sum() == 0:
-        raise RuntimeError("fractional RSI 14.9 produced no numeric values")
 
     print("STAGE1_VERIFY: PASS")
     for key, value in versions.items():
         print(f" - {key}: {value}")
-    print(" - ta integer RSI: PASS")
-    print(" - custom fractional RSI 14.9: PASS")
+    print(" - approved RSI EMA 14, signal EMA 9: PASS")
     print(" - MACD: PASS")
     print(" - Bollinger Bands: PASS")
     print(" - PySide6 loaded in process: NO")

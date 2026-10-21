@@ -5,6 +5,7 @@ import datetime as dt
 from dataclasses import dataclass
 from psycopg import sql
 import pandas as pd
+from .postgresql import BaseDataRepository
 
 
 @dataclass(frozen=True)
@@ -98,3 +99,54 @@ def fetch_index(conn, code: str, start: dt.date | None = None,
       FROM market_core.index_ohlcv_daily d WHERE {} ORDER BY trade_date""").format(
         sql.SQL(" AND ").join(conditions)), params).fetchall()
     return pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume"])
+
+
+class PostgreSQLMarketIndexStore:
+    """Persistence boundary for market-index metadata and daily candles."""
+
+    def __init__(self, settings) -> None:
+        self.settings = settings
+
+    def initialize(self) -> None:
+        with BaseDataRepository(self.settings, application_name="market_index_schema", read_only=False) as repo:
+            with repo.conn.transaction():
+                ensure_schema(repo.conn)
+
+    def upsert_index(self, code: str, market: str, name: str) -> None:
+        with BaseDataRepository(self.settings, application_name="market_index_master", read_only=False) as repo:
+            with repo.conn.transaction():
+                repo.conn.execute(
+                    """INSERT INTO market_core.index_master(index_code,market,index_name)
+                    VALUES (%s,%s,%s) ON CONFLICT(index_code) DO UPDATE SET
+                    market=EXCLUDED.market,index_name=EXCLUDED.index_name,updated_at=now()""",
+                    (code, market, name),
+                )
+
+    def date_range(self, code: str) -> tuple[dt.date | None, dt.date | None]:
+        with BaseDataRepository(self.settings, application_name="market_index_range") as repo:
+            row = repo.conn.execute(
+                """SELECT MIN(trade_date) AS first_date,MAX(trade_date) AS last_date
+                FROM market_core.index_ohlcv_daily WHERE index_code=%s""",
+                (code,),
+            ).fetchone()
+        return row["first_date"], row["last_date"]
+
+    def upsert_bars(self, records: list[tuple]) -> int:
+        if not records:
+            return 0
+        with BaseDataRepository(self.settings, application_name="market_index_bars", read_only=False) as repo:
+            with repo.conn.transaction():
+                with repo.conn.cursor() as cursor:
+                    cursor.executemany(
+                        """INSERT INTO market_core.index_ohlcv_daily
+                        (index_code,trade_date,open_price,high_price,low_price,close_price,volume,trading_value,source)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT(index_code,trade_date) DO UPDATE SET
+                        open_price=EXCLUDED.open_price,high_price=EXCLUDED.high_price,
+                        low_price=EXCLUDED.low_price,close_price=EXCLUDED.close_price,
+                        volume=EXCLUDED.volume,
+                        trading_value=COALESCE(EXCLUDED.trading_value,index_ohlcv_daily.trading_value),
+                        source=EXCLUDED.source,retrieved_at=now()""",
+                        records,
+                    )
+        return len(records)

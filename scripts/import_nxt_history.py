@@ -7,7 +7,7 @@ from pathlib import Path
 
 from krx_research.collectors.nxt_history import read_nxt_history_file, summarize_nxt_history
 from krx_research.data_engine.config import DataEngineSettings, load_environment
-from krx_research.data_engine.postgresql import BaseDataRepository
+from krx_research.data_engine.operational_repository import OperationalDataRepository
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,7 +21,9 @@ def main() -> int:
     load_environment()
     frame = read_nxt_history_file(args.file)
     summary = summarize_nxt_history(frame)
-    with BaseDataRepository(DataEngineSettings.from_environment()) as repository:
+    with OperationalDataRepository(
+        DataEngineSettings.from_environment(), "nxt_history_import", read_only=False
+    ) as repository:
         repository.initialize_schema()
         written = repository.upsert_venue_ohlcv(
             frame,

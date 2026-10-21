@@ -254,8 +254,10 @@ tmp/
 
 # Local database backups and recoverable implementation snapshots
 POSTGRESQL_BACKUP/
+*.dump
 _rollback/
 _patch_review/
+.codex_docx_review/
 
 # Database files must never be tracked in the source repository
 *.db

@@ -9,11 +9,12 @@ from krx_research.qt.application.window_factory import AuxiliaryWindowFactory
 from krx_research.qt.controllers.workstation_controller import WorkstationController
 from krx_research.qt.services.chart_service import ChartService
 from krx_research.qt.services.export_service import ExcelExportService
+from krx_research.qt.services.error_log_service import ErrorLogService
 from krx_research.qt.services.screening_service import ScreeningService
 from krx_research.qt.services.security_search_service import SecuritySearchService
 from krx_research.qt.services.assistant_service import AssistantService
 from krx_research.qt.windows.workstation_window import WorkstationWindow
-from krx_research.ui.data import WorkstationData
+from krx_research.data_engine.workstation_repository import WorkstationData
 from krx_research.database.settings import resolve_database_target
 
 
@@ -42,6 +43,7 @@ class NewStockApplication:
             self.security_search,
             self.window_factory,
             self.assistant,
+            ErrorLogService(),
         )
 
     def run(self) -> int:

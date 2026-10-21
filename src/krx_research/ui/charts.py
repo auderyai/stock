@@ -17,8 +17,9 @@ from pandas import DataFrame
 from krx_research.analytics import EMA_WINDOWS
 
 from .chart_options import ChartDisplayOptions
-from .data import ChartDataset, calculate_volume_profile, select_chart_window
-from .on_demand import TIMEFRAME_LABELS
+from krx_research.models.workstation import ChartDataset
+from krx_research.policies.workstation_options import TIMEFRAME_LABELS
+from krx_research.analytics.chart_frames import calculate_volume_profile, select_chart_window
 
 UP_COLOR = "#d62728"
 DOWN_COLOR = "#1f77b4"

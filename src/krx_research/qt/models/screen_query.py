@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import datetime as dt
 
-from krx_research.ui.data import DATABASE_SOURCE_MODE
+from krx_research.policies.workstation_options import DATABASE_SOURCE_MODE
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from krx_research.qt.services.box_breakout import PeriodPatternQuery, PeriodPatternSearchService
-from krx_research.qt.services.current_pattern import CurrentPatternQuery, CurrentPatternSearchService
-from krx_research.qt.services.pattern_similarity import (
-    PatternSearchQuery, PatternSimilaritySearchService,
+from krx_research.qt.models.pattern_queries import (
+    CurrentPatternQuery, PatternSearchQuery, PeriodPatternQuery,
 )
+from krx_research.qt.services.box_breakout import PeriodPatternSearchService
+from krx_research.qt.services.current_pattern import CurrentPatternSearchService
+from krx_research.qt.services.pattern_similarity import PatternSimilaritySearchService
 
 
 class PatternSearchController:

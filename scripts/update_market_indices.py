@@ -13,8 +13,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from krx_research.data_engine.config import DataEngineSettings
-from krx_research.data_engine.postgresql import BaseDataRepository
-from krx_research.data_engine.market_indices import COMPOSITE_INDEX_SPECS, ensure_schema
+from krx_research.data_engine.market_indices import COMPOSITE_INDEX_SPECS, PostgreSQLMarketIndexStore
 from krx_research.collectors.ls_index_api import LSIndexClient
 
 
@@ -123,10 +122,9 @@ def main(argv=None) -> int:
         print(f'LS xingAPI 지수 사용 불가: {type(error).__name__}; 기존 지수 자료원 사용', file=sys.stderr)
     if not ls_sectors and not has_krx_login:
         print('업종 지수의 인증된 자료원이 없습니다. 종합지수만 갱신합니다.', file=sys.stderr)
-    with BaseDataRepository(DataEngineSettings.from_environment(),
-                            application_name='krx_index_update') as repo:
-        conn = repo.conn
-        ensure_schema(conn)
+    store = PostgreSQLMarketIndexStore(DataEngineSettings.from_environment())
+    store.initialize()
+    try:
         for market in ('KOSPI', 'KOSDAQ'):
             # The selected end date avoids asking the source for future indices.
             composite = next(spec.index_code for spec in COMPOSITE_INDEX_SPECS
@@ -160,19 +158,14 @@ def main(argv=None) -> int:
                         name = name or code
                     except Exception:
                         name = market if code == composite else code
-                    conn.execute('''INSERT INTO market_core.index_master(index_code,market,index_name)
-                      VALUES (%s,%s,%s) ON CONFLICT(index_code) DO UPDATE SET
-                      market=EXCLUDED.market,index_name=EXCLUDED.index_name,updated_at=now()''',
-                      (code,market,name))
-                    existing = conn.execute('''SELECT MIN(trade_date) AS first_date,MAX(trade_date) AS last_date
-                      FROM market_core.index_ohlcv_daily WHERE index_code=%s''',(code,)).fetchone()
-                    first_date = existing['first_date']
+                    store.upsert_index(code, market, name)
+                    first_date, last_date = store.date_range(code)
                     # Existing indices are refreshed from their oldest saved bar.
                     # --start only controls the initial load of a new index.
                     # Initial load is complete history; later runs append from the last
                     # saved date, including that day to allow late source corrections.
                     history_start = (first_date if args.full_refresh and first_date is not None else
-                                     existing['last_date'] if existing['last_date'] is not None else args.start)
+                                     last_date if last_date is not None else args.start)
                     if args.recent_days:
                         history_start = max(history_start, args.end - dt.timedelta(days=args.recent_days))
                     spans = list(chunks(history_start, args.end))
@@ -245,20 +238,9 @@ def main(argv=None) -> int:
                                 records.append((code,day,
                                   *[float(v) for v in values], int(volume) if pd.notna(volume) else None,
                                   float(actual_amount) if actual_amount is not None else None,origin))
-                            if records:
-                                with conn.transaction():
-                                    with conn.cursor() as cursor:
-                                        cursor.executemany('''INSERT INTO market_core.index_ohlcv_daily
-                                          (index_code,trade_date,open_price,high_price,low_price,close_price,volume,trading_value,source)
-                                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                                          ON CONFLICT(index_code,trade_date) DO UPDATE SET
-                                          open_price=EXCLUDED.open_price,high_price=EXCLUDED.high_price,
-                                          low_price=EXCLUDED.low_price,close_price=EXCLUDED.close_price,
-                                          volume=EXCLUDED.volume,
-                                          trading_value=COALESCE(EXCLUDED.trading_value,index_ohlcv_daily.trading_value),
-                                          source=EXCLUDED.source,retrieved_at=now()''',records)
-                                inserted += len(records)
-                                saved_for_code += len(records)
+                            saved = store.upsert_bars(records)
+                            inserted += saved
+                            saved_for_code += saved
                             print(f'{market} {name} {first}~{final}: {len(records)}건', flush=True)
                         except Exception as exc:
                             failures.append(f'{market} {code} {first}~{final}: {exc}')
@@ -276,8 +258,9 @@ def main(argv=None) -> int:
                     consecutive_errors += 1
                     if consecutive_errors >= 3:
                         break
-    if ls_client is not None:
-        ls_client.close()
+    finally:
+        if ls_client is not None:
+            ls_client.close()
     print(f'지수 갱신: {inserted:,}건 저장 / 오류 {len(failures)}건')
     for error in failures[:20]:
         print('오류:',error, file=sys.stderr)

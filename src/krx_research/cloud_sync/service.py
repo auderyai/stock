@@ -1,20 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Any
-
-import psycopg
-from psycopg.rows import dict_row
 
 from krx_research.data_engine.config import database_conninfo
 
@@ -27,6 +23,7 @@ from .archive import (
 )
 from .credentials import DriveCredentials
 from .drive import GoogleDriveClient
+from .repository import latest_cloud_date, menu5_complete, open_cloud_connection
 
 
 METADATA_NAME = "latest.json"
@@ -58,13 +55,13 @@ class StockDriveSyncService:
 
     def bootstrap(self) -> dict[str, Any]:
         conninfo = database_conninfo()
-        with self._connection(conninfo) as conn, tempfile.TemporaryDirectory(prefix="stock-bootstrap-") as name:
+        with open_cloud_connection(conninfo) as conn, tempfile.TemporaryDirectory(prefix="stock-bootstrap-") as name:
             work = Path(name)
             archive = work / "worker-state.tar.gz"
             result = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
                 archive,
                 pg_dump=self._executable("pg_dump"),
-                reference_date=self._latest_cloud_date(conn),
+                reference_date=latest_cloud_date(conn),
                 git_commit=self._git_commit(),
             )
             encrypted = work / "worker-state-a.enc"
@@ -88,7 +85,7 @@ class StockDriveSyncService:
         skipped: list[str] = []
         with self._context.drive() as drive:
             metadata = self._metadata(drive)
-            with self._connection() as conn, tempfile.TemporaryDirectory(prefix="stock-delta-") as name:
+            with open_cloud_connection(read_only=False) as conn, tempfile.TemporaryDirectory(prefix="stock-delta-") as name:
                 work = Path(name)
                 for record in sorted(metadata.get("deltas", []), key=lambda item: item["reference_date"]):
                     encrypted = drive.download(str(record["id"]), work / str(record["name"]))
@@ -100,20 +97,31 @@ class StockDriveSyncService:
                     target.append(str(result["batch_id"]))
                     encrypted.unlink(missing_ok=True)
                     archive.unlink(missing_ok=True)
-            cleaned = self._acknowledge_and_cleanup(drive, metadata)
-        return {"applied": applied, "already_applied": skipped, "cleaned": cleaned}
+            synced_through = self._acknowledge_local_sync(drive, metadata)
+        return {
+            "applied": applied,
+            "already_applied": skipped,
+            "synced_through": synced_through,
+        }
 
-    def update_local(self) -> dict[str, Any]:
+    def update_local(self, *, cleanup_confirmed: bool = False) -> dict[str, Any]:
         """Apply Drive deltas and prove a second pass is idempotent."""
         applied = self.sync_local()
         verified = self.sync_local()
         if verified["applied"]:
             raise CloudArchiveError("로컬 재검증에서 새 적용 건이 발견되었습니다.")
+        through = str(verified.get("synced_through") or "")
+        cleanup = (
+            self.cleanup_synced(date.fromisoformat(through), confirmed=True)
+            if cleanup_confirmed and through
+            else {"status": "not-requested", "dates": [], "file_count": 0}
+        )
         return {
             "status": "verified",
             "applied": applied["applied"],
             "already_applied": verified["already_applied"],
-            "cleaned": sorted(set(applied["cleaned"] + verified["cleaned"])),
+            "synced_through": through or None,
+            "cleanup": cleanup,
         }
 
     def cleanup_synced(self, through: date, *, confirmed: bool = False) -> dict[str, Any]:
@@ -157,10 +165,18 @@ class StockDriveSyncService:
             }
             if not confirmed or not targets:
                 return result
+            # Delete and checkpoint one exact metadata record at a time.  Drive
+            # deletion treats 404 as success, so a metadata-write interruption
+            # resumes safely without broad filename or folder cleanup.
             for item in targets:
                 drive.delete(str(item["id"]))
-            metadata["deltas"] = [item for item in metadata.get("deltas", []) if item not in targets]
-            drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
+                metadata["deltas"] = [
+                    current for current in metadata.get("deltas", [])
+                    if current is not item
+                ]
+                drive.write_json(
+                    metadata, name=METADATA_NAME, parent_id=drive.root_folder_id
+                )
             result["status"] = "deleted"
             return result
 
@@ -177,11 +193,11 @@ class StockDriveSyncService:
             state_archive = work / "worker-state.tar.gz"
             ArchiveCipher.decrypt(encrypted_state, state_archive, self._context.credentials.archive_key)
 
-            with self._connection(conninfo) as conn:
+            with open_cloud_connection(conninfo, read_only=False) as conn:
                 archive_service = DatabaseArchiveService(conn, conninfo=conninfo)
                 archive_service.restore_snapshot(state_archive, psql=self._executable("psql"))
                 self._apply_cloud_deltas(drive, metadata, work, conn)
-                menu5_complete = self._menu5_complete(conn, target_date)
+                is_menu5_complete = menu5_complete(conn, target_date)
 
             commit = self._git_commit()
             checkpoints: list[dict[str, Any]] = []
@@ -190,7 +206,7 @@ class StockDriveSyncService:
 
             if stage == "menu5" and (
                 not self._stage_completed(completed_stage, "menu5")
-                or not menu5_complete
+                or not is_menu5_complete
             ):
                 metadata, menu5_checkpoints = self._run_menu5_checkpointed(
                     drive, metadata, work, conninfo, target_date, commit,
@@ -341,8 +357,8 @@ class StockDriveSyncService:
             checkpoints.append(checkpoint)
             offset = next_offset
 
-        with self._connection(conninfo) as conn:
-            if not self._menu5_complete(conn, target_date):
+        with open_cloud_connection(conninfo) as conn:
+            if not menu5_complete(conn, target_date):
                 raise CloudArchiveError(
                     f"메뉴 5 완료 검증 실패: 요청일 전체 종목이 완료되지 않았습니다: {day}"
                 )
@@ -371,7 +387,7 @@ class StockDriveSyncService:
         day = reference_date.isoformat()
         checkpoint_dir = work / f"menu5-partial-{next_offset:07d}"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        with self._connection(conninfo) as conn:
+        with open_cloud_connection(conninfo) as conn:
             delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
                 checkpoint_dir / f"delta-{day}.tar.gz",
                 target_date=reference_date,
@@ -437,7 +453,7 @@ class StockDriveSyncService:
         # Publish the small daily delta first.  If pg_dump or the state upload
         # fails afterwards, the completed menu remains recoverable and the
         # next worker can rebuild from the previous state plus this delta.
-        with self._connection(conninfo) as conn:
+        with open_cloud_connection(conninfo) as conn:
             delta = DatabaseArchiveService(conn, conninfo=conninfo).export_delta(
                 checkpoint_dir / f"delta-{day}.tar.gz",
                 target_date=reference_date,
@@ -473,7 +489,7 @@ class StockDriveSyncService:
         )
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
 
-        with self._connection(conninfo) as conn:
+        with open_cloud_connection(conninfo) as conn:
             state = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
                 checkpoint_dir / "next-state.tar.gz",
                 pg_dump=self._executable("pg_dump"),
@@ -577,37 +593,17 @@ class StockDriveSyncService:
         return order.get(completed_stage, 0) >= order[requested_stage]
 
     @staticmethod
-    def _retention_cutoff(today: date | None = None) -> date:
-        return (today or date.today()) - timedelta(days=30)
-
-    def _acknowledge_and_cleanup(
-        self, drive: GoogleDriveClient, metadata: dict[str, Any]
-    ) -> list[str]:
-        """Acknowledge local application and delete only deltas older than 30 days."""
+    def _acknowledge_local_sync(
+        drive: GoogleDriveClient, metadata: dict[str, Any]
+    ) -> str | None:
+        """Record the proven local high-water mark without deleting Drive data."""
         deltas = list(metadata.get("deltas", []))
         if not deltas:
-            return []
+            return None
         synced_through = max(str(item["reference_date"]) for item in deltas)
-        cutoff = self._retention_cutoff().isoformat()
-        expired = [
-            item for item in deltas
-            if str(item["reference_date"]) < cutoff
-            and str(item["reference_date"]) <= synced_through
-        ]
-        expired_ids = {str(item["id"]) for item in expired}
-        for item in drive.list_folder(str(metadata["delta_folder_id"])):
-            match = re.match(r"delta-(\d{4}-\d{2}-\d{2})-", str(item.get("name", "")))
-            if match and match.group(1) < cutoff and match.group(1) <= synced_through:
-                expired_ids.add(str(item["id"]))
-        for file_id in expired_ids:
-            drive.delete(file_id)
         metadata["local_synced_through"] = synced_through
-        metadata["deltas"] = [item for item in deltas if item not in expired]
         drive.write_json(metadata, name=METADATA_NAME, parent_id=drive.root_folder_id)
-        return [str(item["reference_date"]) for item in expired]
-
-    def _connection(self, conninfo: str | None = None):
-        return psycopg.connect(conninfo or database_conninfo(), row_factory=dict_row)
+        return synced_through
 
     def _git_commit(self) -> str:
         completed = subprocess.run(
@@ -616,32 +612,6 @@ class StockDriveSyncService:
         )
         value = completed.stdout.strip()
         return value if completed.returncode == 0 and len(value) == 40 else "unknown"
-
-    @staticmethod
-    def _menu5_complete(conn, target_date: date) -> bool:
-        row = conn.execute(
-            """WITH target AS (
-                   SELECT stock_code FROM market_core.cloud_stock_universe)
-               SELECT count(*) AS targets, count(done.stock_code) AS completed
-               FROM target LEFT JOIN market_core.ls_investor_t1702_checkpoint done
-                 ON done.stock_code=target.stock_code
-                AND done.trade_date=%s AND done.exchange_code='K'""",
-            (target_date,),
-        ).fetchone()
-        return bool(row and row["targets"] and row["targets"] == row["completed"])
-
-    @staticmethod
-    def _latest_cloud_date(conn) -> date:
-        row = conn.execute(
-            """SELECT max(trade_date) AS latest
-               FROM market_core.ls_investor_t1702_checkpoint c
-               WHERE EXISTS (
-                   SELECT 1 FROM market_core.venue_ohlcv_daily v
-                   WHERE v.trade_date=c.trade_date AND v.venue='COMBINED')"""
-        ).fetchone()
-        if not row or row["latest"] is None:
-            raise CloudArchiveError("메뉴 5·7 완료 기준일을 찾지 못했습니다.")
-        return row["latest"]
 
     @staticmethod
     def _executable(name: str) -> Path:

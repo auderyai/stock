@@ -9,6 +9,13 @@ from krx_research.qt.presentation.table_policy import DEFAULT_TABLE_POLICY, Tabl
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 
 
+_ALIGNMENTS = {
+    "center": int(Qt.AlignCenter),
+    "right": int(Qt.AlignRight | Qt.AlignVCenter),
+    "left": int(Qt.AlignLeft | Qt.AlignVCenter),
+}
+
+
 class DataFrameModel(QAbstractTableModel):
     """Reusable Qt table model with one presentation policy for all programs."""
 
@@ -50,7 +57,7 @@ class DataFrameModel(QAbstractTableModel):
         if role == Qt.DisplayRole:
             return self._policy.format_value(column, value)
         if role == Qt.TextAlignmentRole:
-            return self._policy.alignment(column, value)
+            return _ALIGNMENTS[self._policy.alignment(column, value)]
         if role == Qt.UserRole:
             return self._frame.iloc[index.row()].to_dict()
         return None
@@ -61,7 +68,9 @@ class DataFrameModel(QAbstractTableModel):
             if role == Qt.DisplayRole:
                 return self._header_labels.get(column, label_for(column))
             if role == Qt.TextAlignmentRole:
-                return self._policy.header_alignment(column, self._frame.iloc[:, section])
+                return _ALIGNMENTS[
+                    self._policy.header_alignment(column, self._frame.iloc[:, section])
+                ]
             return None
         if role == Qt.DisplayRole:
             return str(section + 1)
@@ -71,15 +80,31 @@ class DataFrameModel(QAbstractTableModel):
         if self._frame.empty or not 0 <= column < len(self._frame.columns):
             return
         name = self._frame.columns[column]
-        values = self._frame[name]
-        numeric = pd.to_numeric(values, errors="coerce")
-        key = numeric if numeric.notna().sum() == values.notna().sum() else values.astype(str).str.casefold()
+        key = self._policy.sort_key(self._frame[name])
         self.layoutAboutToBeChanged.emit()
-        self._frame = (self._frame.assign(_sort_key=key)
-                       .sort_values("_sort_key", ascending=order == Qt.AscendingOrder,
-                                    kind="mergesort", na_position="last")
-                       .drop(columns="_sort_key").reset_index(drop=True))
+        ticker = next(
+            (name for name in self._policy.ticker_columns if name in self._frame.columns),
+            None,
+        )
+        prepared = self._frame.assign(_sort_key=key)
+        columns = ["_sort_key"] + ([ticker] if ticker and ticker != name else [])
+        ascending = [order == Qt.AscendingOrder] + [True] * (len(columns) - 1)
+        self._frame = (
+            prepared.sort_values(columns, ascending=ascending, kind="mergesort", na_position="last")
+            .drop(columns="_sort_key")
+            .reset_index(drop=True)
+        )
         self.layoutChanged.emit()
+
+    def apply_default_sort(self) -> tuple[int, Qt.SortOrder] | None:
+        default = self._policy.default_sort(self._frame)
+        if default is None:
+            return None
+        name, ascending = default
+        column = self._frame.columns.get_loc(name)
+        order = Qt.AscendingOrder if ascending else Qt.DescendingOrder
+        self.sort(column, order)
+        return column, order
 
 
 class WorkerSignals(QObject):

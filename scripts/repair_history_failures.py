@@ -94,7 +94,7 @@ def main() -> int:
     security_rows = 0
     security_refresh: dict[str, object] | None = None
 
-    with open_research_store(database_target) as store:
+    with open_research_store(database_target, read_only=False) as store:
         audit = audit_history_failures(
             store,
             args.start,

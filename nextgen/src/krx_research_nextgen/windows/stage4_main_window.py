@@ -6,24 +6,25 @@ from html import escape
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox,
+    QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSpinBox,
-    QPlainTextEdit, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser,
+    QPlainTextEdit, QSplitter, QTextBrowser,
     QVBoxLayout, QWidget,
 )
 
 from krx_research_nextgen.controllers.main_window_controller import MainWindowController
 from krx_research_nextgen.controllers.screening_controller import ScreeningController
-from krx_research_nextgen.models.screen_catalog import SCREENS, ScreenSpec
+from krx_research_nextgen.models.screen_catalog import SCREENS, SCREEN_UNIVERSE_POLICY, ScreenSpec
 from krx_research_nextgen.models.screening import DateRange, ScreeningKind, ScreeningResult
-from krx_research_nextgen.presentation.screening_table import HEADERS, row_values
-from krx_research_nextgen.presentation.ai_result_table import AiResultPresenter
+from krx_research_nextgen.presentation.ai_result_table import navigation_payload
+from krx_research_nextgen.presentation.screening_table import LABELS, result_frame
 from krx_research_nextgen.windows.chart_window import ChartWindow
 from krx_research_nextgen.windows.scenario_window import ScenarioWindow
 from krx_research_nextgen.windows.repeated_screen_window import RepeatedScreenWindow
 from krx_research_nextgen.workers.task_runner import TaskRunner
 from krx_research_nextgen.widgets.calendar_date_edit import CalendarDateEdit
+from krx_research_nextgen.widgets.result_table import ResultTable
 from krx_research_nextgen.windows.daily_research_window import DailyResearchWindow, SPECS
 from krx_research_nextgen.windows.reusable_code_window import ReusableCodeWindow
 from krx_research.qt.presentation.error_presenter import user_friendly_error
@@ -33,17 +34,17 @@ class Stage4MainWindow(QMainWindow):
     """Legacy-compatible PyQt6 View; all data comes through controllers."""
 
     def __init__(self, main_controller: MainWindowController, screening_controller: ScreeningController,
-                 auxiliary_controller, assistant_service, research_window_factory) -> None:
+                 auxiliary_controller, assistant_service, research_window_factory,
+                 daily_research_controller_factory) -> None:
         super().__init__()
         self._main, self._screening, self._auxiliary = main_controller, screening_controller, auxiliary_controller
         self._assistant = assistant_service
         self._research_window_factory = research_window_factory
+        self._daily_research_controller_factory = daily_research_controller_factory
         self._assistant.bind_numbered_screen_runner(self._run_numbered_screen)
         self._tasks = TaskRunner(self)
         self._results: list[ScreeningResult] = []
-        self._table_navigation = None
         self._current_code = ""
-        self._result_ticker_column = 2
         self._comparison_code = "005930"
         self._chart_window: ChartWindow | None = None
         self._sync_chart_window: ChartWindow | None = None
@@ -54,6 +55,7 @@ class Stage4MainWindow(QMainWindow):
         self._daily_research_windows: list[DailyResearchWindow] = []
         self._code_library_window: ReusableCodeWindow | None = None
         self._navigation_context = None
+        self._core_indices_only = False
         self._active_task_title = "종목 차트"
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True); self._search_timer.setInterval(250)
@@ -73,7 +75,13 @@ class Stage4MainWindow(QMainWindow):
         self.start_date = CalendarDateEdit(); self.end_date = CalendarDateEdit()
         self.rank_limit = QSpinBox(); self.rank_limit.setRange(1, 500); self.rank_limit.setValue(50); self.rank_limit.setSuffix(" 위")
         for row, pair in enumerate((("자료", self.source), ("시장", self.market), ("시작", self.start_date), ("종료", self.end_date), ("출력 순위", self.rank_limit))):
-            grid.addWidget(QLabel(pair[0]), row, 0); grid.addWidget(pair[1], row, 1)
+            label = QLabel(pair[0]); grid.addWidget(label, row, 0); grid.addWidget(pair[1], row, 1)
+            if pair[1] is self.rank_limit: self.rank_limit_label = label
+        self.core_indices_only = QCheckBox("KOSPI200 + KOSDAQ150 종목만")
+        self.core_indices_only.setToolTip(
+            "체크하면 모든 스크리닝의 종목 범위를 KOSPI200과 KOSDAQ150 구성종목의 합집합으로 제한합니다."
+        )
+        grid.addWidget(self.core_indices_only, grid.rowCount(), 0, 1, 2)
         left_layout.addWidget(query)
 
         near = QGroupBox("52주 최고가 대비 종가 (%)"); near_row = QHBoxLayout(near)
@@ -119,15 +127,7 @@ class Stage4MainWindow(QMainWindow):
         self.chart_button = QPushButton("선택 종목 차트")
         top.addWidget(self.heading, 1); top.addWidget(self.sync_chart); top.addWidget(self.export_button); top.addWidget(self.chart_button)
         right_layout.addLayout(top)
-        self.result_table = QTableWidget(0, len(HEADERS))
-        self.result_table.setHorizontalHeaderLabels(HEADERS)
-        self.result_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.result_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.result_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.result_table.setAlternatingRowColors(True); self.result_table.verticalHeader().setVisible(False)
-        self.result_table.horizontalHeader().setSectionsMovable(True)
-        for col in range(self.result_table.columnCount()):
-            self.result_table.horizontalHeaderItem(col).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.result_table = ResultTable()
         content = QSplitter(Qt.Orientation.Vertical); content.addWidget(self.result_table)
         assistant = QWidget(); assistant_layout = QVBoxLayout(assistant)
         assistant_layout.addWidget(QLabel("Codex 구독 분석 대화 · Stock DB 값 우선 · 연구자료 검색 · 1회용 코드 격리"))
@@ -145,9 +145,11 @@ class Stage4MainWindow(QMainWindow):
         self.search_edit.textChanged.connect(self._search_timer.start); self._search_timer.timeout.connect(self._search_now)
         self.run_button.clicked.connect(self._run_selected); self.screen_list.itemDoubleClicked.connect(lambda _: self._run_selected())
         self.screen_list.currentRowChanged.connect(self._screen_changed)
+        self.core_indices_only.toggled.connect(self._set_core_indices_only)
         self.repeated_button.clicked.connect(self._run_repeated)
-        self.chart_button.clicked.connect(self._open_selected_chart); self.result_table.itemDoubleClicked.connect(lambda _: self._open_selected_chart())
-        self.result_table.itemSelectionChanged.connect(self._sync_selection)
+        self.chart_button.clicked.connect(self._open_selected_chart)
+        self.result_table.chartRequested.connect(self._open_selected_chart)
+        self.result_table.currentTickerChanged.connect(self._sync_selection)
         self.search_chart.clicked.connect(self._open_search_chart); self.search_list.itemDoubleClicked.connect(lambda _: self._open_search_chart())
         self.use_comparison.clicked.connect(self._set_comparison); self.near_button.clicked.connect(self._run_near_high)
         self.export_button.clicked.connect(self._export_results)
@@ -189,11 +191,16 @@ class Stage4MainWindow(QMainWindow):
     def _selected_spec(self) -> ScreenSpec | None:
         row = self.screen_list.currentRow(); return SCREENS[row] if 0 <= row < len(SCREENS) else None
 
+    def _set_core_indices_only(self, checked: bool) -> None:
+        self._core_indices_only = checked
+
+    def _effective_market(self, configured_market: str) -> str:
+        return SCREEN_UNIVERSE_POLICY.resolve(configured_market, self._core_indices_only)
+
     def _screen_changed(self, _row: int) -> None:
         spec = self._selected_spec()
         uses_limit = spec is None or spec.uses_rank_limit
-        self.rank_limit.setEnabled(uses_limit)
-        self.rank_limit.setToolTip("" if uses_limit else "이 항목은 해당 종목 전체를 출력하므로 순위를 제한하지 않습니다.")
+        self.rank_limit_label.setVisible(uses_limit); self.rank_limit.setVisible(uses_limit)
         database_only = spec is not None and spec.database_only
         if database_only:
             self.source.setCurrentIndex(self.source.findData("database"))
@@ -213,7 +220,7 @@ class Stage4MainWindow(QMainWindow):
             raise ValueError(f"{number}번 항목은 실행할 수 없습니다.")
         selected = DateRange(*period)
         rows = self._screening.run(
-            spec.kind, limit=limit, market=spec.market,
+            spec.kind, limit=limit, market=self._effective_market(spec.market),
             comparison_ticker=self._comparison_code, as_of_date=selected.end.isoformat(),
             period=selected,
         )
@@ -225,6 +232,7 @@ class Stage4MainWindow(QMainWindow):
     def _run_screening(self, kind: ScreeningKind, limit: int, market: str, title: str | None = None) -> None:
         period = self._checked_period()
         if period is None: return
+        market = self._effective_market(market)
         self.run_button.setEnabled(False); self.status.setText("스크리닝 조회 중입니다...")
         date = period.end.isoformat()
         ranged = kind is ScreeningKind.HIGH_52W and period.start != period.end
@@ -247,7 +255,7 @@ class Stage4MainWindow(QMainWindow):
     def _screening_ready(self, rows, title: str, period: DateRange, ranged: bool = False, source_mode: str = "database") -> None:
         source_label = "실시간" if source_mode == "realtime" else "데이터베이스"
         self._active_task_title = f"{title} · {source_label}"
-        self._results = rows; self._table_navigation = None
+        self._results = rows
         self._populate_screening(rows); self.heading.setText(self._active_task_title)
         dates = sorted({row.trade_date for row in rows})
         basis = f"기준일별 {len(dates):,}거래일" if ranged else f"판정기준일 {dates[-1] if dates else period.end}"
@@ -266,8 +274,9 @@ class Stage4MainWindow(QMainWindow):
         self.status.setText(f"{period.start} ~ {period.end} 각 거래일의 {spec.title}를 계산하는 중입니다...")
         comparison, low, high = self._comparison_code, self.near_low.value(), self.near_high.value()
         limit = 500 if spec.kind is ScreeningKind.HIGH_52W else self.rank_limit.value()
+        market = self._effective_market(spec.market)
         self._tasks.submit(
-            lambda: self._screening.run_repeated(spec.kind, period, limit=limit, market=spec.market,
+            lambda: self._screening.run_repeated(spec.kind, period, limit=limit, market=market,
                                                   comparison_ticker=comparison, near_low=low, near_high=high),
             on_result=lambda rows: self._repeated_ready(rows, spec.title, period),
             on_error=lambda trace: self._show_error("기간 내 다빈도 종목 오류", trace),
@@ -282,22 +291,7 @@ class Stage4MainWindow(QMainWindow):
         self.status.setText(f"선택기간의 각 거래일 계산 완료 · 2회 이상 등장 종목 {len(rows):,}개")
 
     def _populate_screening(self, rows: list[ScreeningResult]) -> None:
-        self._result_ticker_column = 2
-        self.result_table.clear(); self.result_table.setColumnCount(len(HEADERS)); self.result_table.setHorizontalHeaderLabels(HEADERS)
-        self.result_table.setRowCount(len(rows))
-        for col in range(self.result_table.columnCount()): self.result_table.horizontalHeaderItem(col).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        for row, item in enumerate(rows):
-            values = row_values(item)
-            for col, value in enumerate(values):
-                cell = QTableWidgetItem(value)
-                cell.setTextAlignment(
-                    Qt.AlignmentFlag.AlignCenter if col in (0, 2) else
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter if col in (1, 5, 6, 7, 8, 9, 10, 11, 12, 14) else
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-                )
-                self.result_table.setItem(row, col, cell)
-        if rows: self.result_table.selectRow(0)
-        self.result_table.resizeColumnsToContents()
+        self.result_table.set_frame(result_frame(rows), labels=LABELS)
 
     def _export_results(self) -> None:
         if not self._results: return
@@ -309,13 +303,12 @@ class Stage4MainWindow(QMainWindow):
                                on_error=lambda trace: self._show_error("결과 엑셀 저장 오류", trace), channel="export")
 
     def _selected_result_code(self) -> str:
-        row = self.result_table.currentRow()
-        item = self.result_table.item(row, self._result_ticker_column) if row >= 0 and self._result_ticker_column >= 0 else None
-        return item.text() if item else ""
+        return self.result_table.current_ticker() or ""
 
     def _open_selected_chart(self) -> None:
-        self._navigation_context = self._table_navigation
+        self._navigation_context = self.result_table.navigation_payload(self._active_task_title)
         self._open_chart(self._selected_result_code(), self._active_task_title)
+
     def _open_search_chart(self) -> None:
         item = self.search_list.currentItem()
         if item: self._navigation_context = None; self._open_chart(str(item.data(Qt.ItemDataRole.UserRole)), "종목 검색")
@@ -369,9 +362,10 @@ class Stage4MainWindow(QMainWindow):
                                on_error=lambda trace: self._show_error(f"{code} 차트 오류", trace),
                                channel=f"chart:{id(window)}")
 
-    def _sync_selection(self) -> None:
+    def _sync_selection(self, *_args) -> None:
         if self.sync_chart.isChecked() and self._sync_chart_window and self._sync_chart_window.isVisible():
-            self._navigation_context = self._table_navigation; self._open_chart(self._selected_result_code())
+            self._navigation_context = self.result_table.navigation_payload(self._active_task_title)
+            self._open_chart(self._selected_result_code())
 
     def _set_comparison(self) -> None:
         item = self.search_list.currentItem()
@@ -386,7 +380,9 @@ class Stage4MainWindow(QMainWindow):
     def _open_market_index(self) -> None: self._auxiliary.open_market_index(self)
 
     def _open_daily_research(self, kind: str) -> None:
-        window = DailyResearchWindow(kind, self)
+        window = DailyResearchWindow(
+            kind, self._daily_research_controller_factory(kind), self
+        )
         window.chart_requested.connect(lambda code, k=kind: self._open_chart(code, SPECS[k].title))
         self._daily_research_windows.append(window)
         window.destroyed.connect(lambda _=None, w=window: self._daily_research_windows.remove(w) if w in self._daily_research_windows else None)
@@ -437,27 +433,14 @@ class Stage4MainWindow(QMainWindow):
         self._code_library_window.refresh(); self._code_library_window.show(); self._code_library_window.raise_()
 
     def _show_ai_frame(self, frame, labels, heading: str) -> None:
-        presentation = AiResultPresenter().present(frame, labels)
-        self._result_ticker_column = presentation.ticker_column
         self._results = []
-        self._table_navigation = self._frame_navigation(presentation, heading)
-        self.result_table.clear(); self.result_table.setColumnCount(len(presentation.headers)); self.result_table.setRowCount(len(presentation.rows))
-        self.result_table.setHorizontalHeaderLabels(presentation.headers)
-        for column in range(len(presentation.headers)): self.result_table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        qt_alignments = {"center": Qt.AlignmentFlag.AlignCenter,
-                         "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                         "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter}
-        for row, values in enumerate(presentation.rows):
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value); item.setTextAlignment(qt_alignments[presentation.alignments[column]])
-                self.result_table.setItem(row, column, item)
-        self.result_table.resizeColumnsToContents(); self.heading.setText(heading)
+        self.result_table.set_frame(frame, labels=labels)
+        self.heading.setText(heading)
 
     @staticmethod
-    def _frame_navigation(presentation, heading: str):
-        items = [{"code": code, "values": row} for code, row in zip(presentation.codes, presentation.rows) if len(code) == 6]
-        return {"title": heading, "headers": presentation.headers, "items": items,
-                "alignments": presentation.alignments} if items else None
+    def _frame_navigation(presentation, heading: str) -> dict:
+        """Compatibility entry point backed by the shared navigation adapter."""
+        return navigation_payload(presentation, heading)
 
     def _checked_period(self) -> DateRange | None:
         try: return DateRange(self.start_date.value(), self.end_date.value())
@@ -477,4 +460,4 @@ class Stage4MainWindow(QMainWindow):
     def chart(self): return self._chart_window.chart if self._chart_window else None
     def _chart_now(self) -> None: self._open_selected_chart()
     def _clear_screening_results(self) -> None:
-        self._results = []; self._table_navigation = None; self.result_table.setRowCount(0)
+        self._results = []; self.result_table.set_frame(None)

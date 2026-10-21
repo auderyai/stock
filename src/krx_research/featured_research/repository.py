@@ -41,7 +41,9 @@ def _amount(fact: dict[str, Any], source_eok: float | None) -> tuple[Decimal | N
 
 
 class FeaturedResearchRepository(AbstractContextManager["FeaturedResearchRepository"]):
-    def __init__(self, settings: DataEngineSettings | None = None) -> None:
+    def __init__(
+        self, settings: DataEngineSettings | None = None, *, read_only: bool = True
+    ) -> None:
         if psycopg is None:
             raise RuntimeError("psycopg가 설치되지 않았습니다.")
         self.settings = settings or DataEngineSettings.from_environment()
@@ -49,8 +51,11 @@ class FeaturedResearchRepository(AbstractContextManager["FeaturedResearchReposit
             _normalized_conninfo(self.settings.conninfo),
             row_factory=dict_row,
             application_name="krx_featured_research",
-            autocommit=False,
+            autocommit=True,
         )
+        if read_only:
+            self.conn.execute("SET default_transaction_read_only TO on")
+        self.conn.autocommit = False
 
     def __exit__(self, exc_type: object, _exc: object, _tb: object) -> None:
         if exc_type is None:

@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle = service.prepare_recent_chart(
             symbol,
             limit=limit,
-            config=IndicatorConfig(rsi_period=14.9),
+            config=IndicatorConfig(),
         )
 
     FinplotChartAdapter().render(bundle)

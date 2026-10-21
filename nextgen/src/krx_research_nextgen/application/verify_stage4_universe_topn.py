@@ -6,6 +6,7 @@ from krx_research_nextgen.controllers.screening_controller import ScreeningContr
 from krx_research_nextgen.models.screening import ScreeningKind
 from krx_research_nextgen.repositories.screening_repository import ScreeningRepository
 from krx_research_nextgen.services.screening_service import ScreeningService
+from krx_research_nextgen.services.screening_export_service import ScreeningExportService
 
 
 UNIVERSES = ("ALL", "KOSPI", "KOSDAQ", "KOSPI200", "KOSDAQ150")
@@ -14,7 +15,7 @@ UNIVERSES = ("ALL", "KOSPI", "KOSDAQ", "KOSPI200", "KOSDAQ150")
 def main() -> int:
     with ScreeningRepository() as repo:
         service = ScreeningService(repo)
-        controller = ScreeningController(service)
+        controller = ScreeningController(service, ScreeningExportService())
 
         latest = repo.latest_trade_date()
         status = repo.universe_status(latest)

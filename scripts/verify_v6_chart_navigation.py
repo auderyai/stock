@@ -10,6 +10,7 @@ errors: list[str] = []
 
 required = [
     'src/krx_research/qt/strategies/chart_navigation.py',
+    'src/krx_research/presentation/table_policy.py',
     'src/krx_research/qt/presentation/table_policy.py',
     'src/krx_research/qt/widgets/result_table.py',
     'src/krx_research/qt/windows/chart_window.py',
@@ -41,8 +42,8 @@ for token in ('currentTickerChanged', 'select_ticker', 'SelectRows'):
     if token not in result_table:
         errors.append(f'result table navigation missing: {token}')
 
-policy = (ROOT / 'src/krx_research/qt/presentation/table_policy.py').read_text(encoding='utf-8')
-for token in ('trade_date', 'trading_value', 'source_file', 'volume_columns', 'AlignCenter', 'AlignRight'):
+policy = (ROOT / 'src/krx_research/presentation/table_policy.py').read_text(encoding='utf-8')
+for token in ('trade_date', 'trading_value', 'source_file', 'volume_columns', '"center"', '"right"'):
     if token not in policy:
         errors.append(f'table policy missing: {token}')
 

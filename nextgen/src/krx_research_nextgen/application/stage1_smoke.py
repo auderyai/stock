@@ -19,7 +19,7 @@ def main() -> int:
     bundle = service.prepare(
         "STAGE1-FINPLOT-SMOKE",
         frame,
-        config=IndicatorConfig(rsi_period=14.9),
+        config=IndicatorConfig(),
     )
     FinplotChartAdapter().render(bundle)
 

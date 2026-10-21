@@ -21,6 +21,7 @@ class ResearchStore(BaseDataRepository):
         *args: Any,
         settings: DataEngineSettings | None = None,
         conninfo: str | None = None,
+        read_only: bool = True,
         **kwargs: Any,
     ) -> None:
         # A legacy PostgreSQL/MariaDB path is intentionally ignored. PostgreSQL comes from .env.
@@ -33,7 +34,12 @@ class ResearchStore(BaseDataRepository):
             conninfo = str(path)
         if conninfo is None and candidate_url:
             conninfo = str(candidate_url)
-        super().__init__(settings=settings, conninfo=conninfo, application_name="krx_research_compat_v30")
+        super().__init__(
+            settings=settings,
+            conninfo=conninfo,
+            application_name="krx_research_compat_v30",
+            read_only=read_only,
+        )
         self.service = MarketDataService(
             self,
             cache_size=self.settings.cache_size,

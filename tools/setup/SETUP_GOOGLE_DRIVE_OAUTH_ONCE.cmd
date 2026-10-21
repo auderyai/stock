@@ -11,13 +11,6 @@ if not exist "%PYTHON%" (
   exit /b 1
 )
 
-if not exist "%ROOT%\tools\setup\google_oauth_client.json" (
-  echo [ERROR] OAuth client JSON not found.
-  echo Expected: %ROOT%\tools\setup\google_oauth_client.json
-  pause
-  exit /b 1
-)
-
 "%PYTHON%" -c "import google_auth_oauthlib" >nul 2>&1
 if errorlevel 1 (
   echo Installing the isolated Google Drive OAuth dependency...

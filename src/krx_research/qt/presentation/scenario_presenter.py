@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 
 from krx_research.analytics.indicator_scenario import INDICATORS
+from krx_research.policies.chart_analysis import DEFAULT_CHART_ANALYSIS_POLICY
 from krx_research.qt.presentation.table_policy import TablePresentationPolicy
 
 EMA_CHANGE = {
     f"EMA {span} 일별 변화율 (%)": f"ema{span}_change_pct"
-    for span in (5, 10, 15, 33, 56, 112, 224, 448)
+    for span in DEFAULT_CHART_ANALYSIS_POLICY.moving_average_periods
 }
 
 

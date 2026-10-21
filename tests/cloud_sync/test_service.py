@@ -14,6 +14,7 @@ from krx_research.cloud_sync.service import (
     SyncContext,
     TransientSourceError,
 )
+from krx_research.cloud_sync.repository import menu5_complete
 
 
 class CloudSyncServiceTests(unittest.TestCase):
@@ -80,9 +81,9 @@ class CloudSyncServiceTests(unittest.TestCase):
         ) as partial, patch.object(
             service, "_publish_checkpoint",
             return_value=({**metadata, "completed_stage": "menu5"}, {"stage": "menu5"}),
-        ) as final, patch.object(
-            service, "_connection", return_value=connection
-        ), patch.object(service, "_menu5_complete", return_value=True):
+        ) as final, patch(
+            "krx_research.cloud_sync.service.open_cloud_connection", return_value=connection
+        ), patch("krx_research.cloud_sync.service.menu5_complete", return_value=True):
             result_metadata, checkpoints = service._run_menu5_checkpointed(
                 object(), metadata, root, "db", date(2026, 10, 12), "abcdef123456"
             )
@@ -101,9 +102,9 @@ class CloudSyncServiceTests(unittest.TestCase):
         connection = MagicMock()
         connection.__enter__.return_value = connection
 
-        with patch.object(service, "_run", return_value=4), patch.object(
-            service, "_connection", return_value=connection
-        ), patch.object(service, "_menu5_complete", return_value=False), patch.object(
+        with patch.object(service, "_run", return_value=4), patch(
+            "krx_research.cloud_sync.service.open_cloud_connection", return_value=connection
+        ), patch("krx_research.cloud_sync.service.menu5_complete", return_value=False), patch.object(
             service, "_publish_checkpoint"
         ) as publish:
             with self.assertRaisesRegex(CloudArchiveError, "완료 검증 실패"):
@@ -135,12 +136,12 @@ class CloudSyncServiceTests(unittest.TestCase):
             "krx_research.cloud_sync.service.ArchiveCipher.decrypt"
         ), patch(
             "krx_research.cloud_sync.service.DatabaseArchiveService"
-        ), patch.object(
-            service, "_connection", return_value=connection
+        ), patch(
+            "krx_research.cloud_sync.service.open_cloud_connection", return_value=connection
         ), patch.object(
             service, "_apply_cloud_deltas"
-        ), patch.object(
-            service, "_menu5_complete", return_value=False
+        ), patch(
+            "krx_research.cloud_sync.service.menu5_complete", return_value=False
         ), patch.object(
             service, "_git_commit", return_value="abcdef123456"
         ), patch.object(
@@ -192,9 +193,9 @@ class CloudSyncServiceTests(unittest.TestCase):
             service,
             "_publish_checkpoint",
             return_value=({**metadata, "completed_stage": "menu5"}, {"stage": "menu5"}),
-        ), patch.object(
-            service, "_connection", return_value=connection
-        ), patch.object(service, "_menu5_complete", return_value=True):
+        ), patch(
+            "krx_research.cloud_sync.service.open_cloud_connection", return_value=connection
+        ), patch("krx_research.cloud_sync.service.menu5_complete", return_value=True):
             service._run_menu5_checkpointed(
                 object(), metadata, root, "db", date(2026, 10, 13), "abcdef123456"
             )
@@ -209,12 +210,12 @@ class CloudSyncServiceTests(unittest.TestCase):
             "completed": 2673,
         }
         self.assertFalse(
-            StockDriveSyncService._menu5_complete(connection, date(2026, 10, 13))
+            menu5_complete(connection, date(2026, 10, 13))
         )
 
         connection.execute.return_value.fetchone.return_value["completed"] = 2674
         self.assertTrue(
-            StockDriveSyncService._menu5_complete(connection, date(2026, 10, 13))
+            menu5_complete(connection, date(2026, 10, 13))
         )
         self.assertIn("cloud_stock_universe", connection.execute.call_args.args[0])
 
@@ -224,9 +225,9 @@ class CloudSyncServiceTests(unittest.TestCase):
         ))
         connection = MagicMock()
         connection.__enter__.return_value = connection
-        with patch.object(service, "_run", side_effect=[4, 0]) as run, patch.object(
-            service, "_connection", return_value=connection
-        ), patch.object(service, "_menu5_complete", return_value=True), patch.object(
+        with patch.object(service, "_run", side_effect=[4, 0]) as run, patch(
+            "krx_research.cloud_sync.service.open_cloud_connection", return_value=connection
+        ), patch("krx_research.cloud_sync.service.menu5_complete", return_value=True), patch.object(
             service, "_publish_checkpoint",
             return_value=({}, {"stage": "menu5", "delta_rows": 1}),
         ):
@@ -240,7 +241,7 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual("5", run.call_args_list[0].args[2])
         self.assertEqual("7", run.call_args_list[1].args[2])
 
-    def test_cleanup_deletes_only_locally_applied_deltas_older_than_30_days(self) -> None:
+    def test_sync_acknowledgement_never_deletes_drive_files(self) -> None:
         root = Path.cwd()
         service = StockDriveSyncService(SyncContext(
             root, DriveCredentials("id", "secret", "refresh", "folder", "key")
@@ -253,18 +254,12 @@ class CloudSyncServiceTests(unittest.TestCase):
                 {"id": "kept", "reference_date": "2026-10-01"},
             ]
         }
-        drive.list_folder.return_value = [
-            {"id": "orphan", "name": "delta-2026-09-02-menu5-old.enc"},
-            {"id": "recent", "name": "delta-2026-10-01-menu7-new.enc"},
-        ]
+        synced = service._acknowledge_local_sync(drive, metadata)
 
-        with patch.object(service, "_retention_cutoff", return_value=date(2026, 9, 15)):
-            cleaned = service._acknowledge_and_cleanup(drive, metadata)
-
-        self.assertEqual(["2026-09-01"], cleaned)
-        self.assertEqual({"old", "orphan"}, {call.args[0] for call in drive.delete.call_args_list})
+        self.assertEqual("2026-10-01", synced)
+        drive.delete.assert_not_called()
         self.assertEqual("2026-10-01", metadata["local_synced_through"])
-        self.assertEqual(["kept"], [item["id"] for item in metadata["deltas"]])
+        self.assertEqual(["old", "kept"], [item["id"] for item in metadata["deltas"]])
 
     def test_manual_cleanup_deletes_only_synced_menu7_deltas(self) -> None:
         service = StockDriveSyncService(SyncContext(
@@ -291,6 +286,34 @@ class CloudSyncServiceTests(unittest.TestCase):
         self.assertEqual("deleted", deleted["status"])
         drive.delete.assert_called_once_with("old")
         self.assertEqual(["new"], [item["id"] for item in metadata["deltas"]])
+        drive.write_json.assert_called_once()
+
+    def test_manual_cleanup_checkpoints_each_exact_deletion(self) -> None:
+        service = StockDriveSyncService(SyncContext(
+            Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        drive = MagicMock(root_folder_id="folder")
+        drive.__enter__.return_value = drive
+        metadata = {
+            "state": {"reference_date": "2026-10-14"},
+            "local_synced_through": "2026-10-14",
+            "stage_dates": {"2026-10-13": "menu7", "2026-10-14": "menu7"},
+            "deltas": [
+                {"id": "first", "reference_date": "2026-10-13"},
+                {"id": "second", "reference_date": "2026-10-14"},
+            ],
+        }
+        snapshots = []
+        drive.write_json.side_effect = lambda document, **_: snapshots.append(
+            [item["id"] for item in document["deltas"]]
+        )
+        with patch.object(SyncContext, "drive", return_value=drive), patch.object(
+            service, "_metadata", return_value=metadata
+        ):
+            service.cleanup_synced(date(2026, 10, 14), confirmed=True)
+
+        self.assertEqual(["first", "second"], [call.args[0] for call in drive.delete.call_args_list])
+        self.assertEqual([["second"], []], snapshots)
 
     def test_manual_cleanup_rejects_unapplied_date(self) -> None:
         service = StockDriveSyncService(SyncContext(
@@ -313,15 +336,32 @@ class CloudSyncServiceTests(unittest.TestCase):
             Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
         ))
         with patch.object(service, "sync_local", side_effect=[
-            {"applied": ["batch"], "already_applied": [], "cleaned": []},
-            {"applied": [], "already_applied": ["batch"], "cleaned": []},
+            {"applied": ["batch"], "already_applied": [], "synced_through": "2026-10-14"},
+            {"applied": [], "already_applied": ["batch"], "synced_through": "2026-10-14"},
         ]) as sync:
             result = service.update_local()
 
         self.assertEqual("verified", result["status"])
         self.assertEqual(["batch"], result["applied"])
         self.assertEqual(["batch"], result["already_applied"])
+        self.assertEqual("not-requested", result["cleanup"]["status"])
         self.assertEqual(2, sync.call_count)
+
+    def test_update_local_cleans_only_after_idempotence_and_explicit_confirmation(self) -> None:
+        service = StockDriveSyncService(SyncContext(
+            Path.cwd(), DriveCredentials("id", "secret", "refresh", "folder", "key")
+        ))
+        passes = [
+            {"applied": ["batch"], "already_applied": [], "synced_through": "2026-10-14"},
+            {"applied": [], "already_applied": ["batch"], "synced_through": "2026-10-14"},
+        ]
+        with patch.object(service, "sync_local", side_effect=passes), patch.object(
+            service, "cleanup_synced", return_value={"status": "deleted", "file_count": 1}
+        ) as cleanup:
+            result = service.update_local(cleanup_confirmed=True)
+
+        cleanup.assert_called_once_with(date(2026, 10, 14), confirmed=True)
+        self.assertEqual("deleted", result["cleanup"]["status"])
 
 
 if __name__ == "__main__":

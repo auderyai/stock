@@ -6,13 +6,22 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIntValidator
 from PyQt6.QtWidgets import (
-    QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMessageBox, QPushButton, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
-from krx_research_nextgen.services.scenario_service import EMA_SPANS, INDICATORS
+from krx_research_nextgen.models.scenario import EMA_SPANS, INDICATORS
 from krx_research_nextgen.workers.scenario_worker import ScenarioWorker
+from krx_research_nextgen.widgets.result_table import ResultTable
+
+
+_CHECKPOINT_LABELS = {
+    "reference_date": "기준일", "baseline_price": "AI 기본 예상가",
+    "scenario_price": "AI 지표변경 예상가", "target_path_price": "목표 도달 가상가격",
+    "prediction_range": "AI 10~90% 범위", "validation_error": "검증 오차",
+    "direction_accuracy": "방향 일치", "signal": "판정",
+}
 
 
 class ScenarioPlotWidget(pg.PlotWidget):
@@ -73,8 +82,7 @@ class ScenarioWindow(QMainWindow):
         self.run_button = QPushButton("시나리오 실행"); self.run_button.clicked.connect(self._run); controls.addWidget(self.run_button); controls.addStretch()
         self.indicator.currentTextChanged.connect(self._indicator_changed)
         self.status = QLabel("지표 목표값과 기간을 입력해 시나리오를 실행하세요."); self.status.setWordWrap(True); layout.addWidget(self.status)
-        self.table = QTableWidget(0, 8); self.table.setHorizontalHeaderLabels(("기준일", "AI 기본 예상가", "AI 지표변경 예상가", "목표 도달 가상가격", "AI 10~90% 범위", "검증 오차", "방향 일치", "판정")); self.table.setMaximumHeight(140); self._configure_table_header(); layout.addWidget(self.table)
-        for column in range(self.table.columnCount()): self.table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table = ResultTable(); self.table.setMaximumHeight(140); self._configure_table_header(); layout.addWidget(self.table)
         self.training = QLabel("실행 후 시간순 학습·검증 구간을 표시합니다."); self.training.setWordWrap(True); layout.addWidget(self.training)
         buttons = QHBoxLayout(); layout.addLayout(buttons); buttons.addWidget(QLabel("보조지표 보기"))
         for label in ("전체", *tuple(INDICATORS)[:6], "EMA 변화율 전체"):
@@ -90,7 +98,7 @@ class ScenarioWindow(QMainWindow):
         note = QLabel("AI 예상가는 과거 자료의 시간순 학습·검증 결과이며, 목표 도달 가격과 보조지표는 가상 OHLCV 경로로 재계산됩니다. 매매 판정은 검증 기준 충족 시에만 표시합니다."); note.setWordWrap(True); layout.addWidget(note)
 
     def _configure_table_header(self) -> None:
-        header = self.table.horizontalHeader(); header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive); header.setStretchLastSection(False)
+        header = self.table.horizontalHeader(); header.setStretchLastSection(False)
         for column, width in enumerate((110, 145, 155, 155, 175, 155, 115, 210)): header.resizeSection(column, width)
 
     def _indicator_changed(self) -> None:
@@ -113,14 +121,19 @@ class ScenarioWindow(QMainWindow):
         self.training.setText(" | ".join(f"{r.days}일: 학습 {r.train_period}, 검증 {r.test_period}" for r in analysis.checkpoints))
 
     def _fill_table(self) -> None:
-        rows, path = self._analysis.checkpoints, self._analysis.path; self.table.setRowCount(len(rows))
-        for row, item in enumerate(rows):
-            values = (f"{path.index[item.days - 1]:%Y-%m-%d}", f"{item.baseline_price:,.0f}", f"{item.scenario_price:,.0f}", f"{path.close.iloc[item.days - 1]:,.0f}", f"{item.lower_price:,.0f} ~ {item.upper_price:,.0f}", f"{item.mae:.2f}% (기준 {item.naive_mae:.2f}%)", f"{item.direction:.1f}%", item.signal)
-            for col, value in enumerate(values):
-                cell = QTableWidgetItem(str(value))
-                align = Qt.AlignmentFlag.AlignCenter if col == 0 else Qt.AlignmentFlag.AlignRight if col < 7 else Qt.AlignmentFlag.AlignLeft
-                cell.setTextAlignment(align | Qt.AlignmentFlag.AlignVCenter)
-                self.table.setItem(row, col, cell)
+        rows, path = self._analysis.checkpoints, self._analysis.path
+        frame = pd.DataFrame(({
+            "reference_date": path.index[item.days - 1].date(),
+            "baseline_price": item.baseline_price,
+            "scenario_price": item.scenario_price,
+            "target_path_price": path.close.iloc[item.days - 1],
+            "prediction_range": f"{item.lower_price:,.0f} ~ {item.upper_price:,.0f}",
+            "validation_error": f"{item.mae:.2f}% (기준 {item.naive_mae:.2f}%)",
+            "direction_accuracy": f"{item.direction:.1f}%",
+            "signal": item.signal,
+        } for item in rows), columns=_CHECKPOINT_LABELS)
+        self.table.set_frame(frame, labels=_CHECKPOINT_LABELS)
+        self._configure_table_header()
 
     def _draw_price(self) -> None:
         plot, a, rows = self.price_plot, self._analysis, self._analysis.checkpoints; current = a.current_price

@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(r"C:\stock")
+ROOT = Path(__file__).resolve().parents[4]
 NEXTGEN_SRC = ROOT / "nextgen" / "src"
 if str(NEXTGEN_SRC) not in sys.path:
     sys.path.insert(0, str(NEXTGEN_SRC))

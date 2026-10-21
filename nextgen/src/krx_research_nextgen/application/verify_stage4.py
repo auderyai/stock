@@ -11,7 +11,9 @@ from krx_research_nextgen.repositories.screening_repository import ScreeningRepo
 from krx_research_nextgen.repositories.security_repository import SecurityRepository
 from krx_research_nextgen.services.market_chart_service import MarketChartService
 from krx_research_nextgen.services.screening_service import ScreeningService
+from krx_research_nextgen.services.screening_export_service import ScreeningExportService
 from krx_research_nextgen.services.security_search_service import SecuritySearchService
+from krx_research_nextgen.services.scenario_service import ScenarioService
 
 
 def _imports(path: Path) -> list[str]:
@@ -57,9 +59,10 @@ def main() -> int:
         main_controller = MainWindowController(
             SecuritySearchService(security_repo),
             MarketChartService(chart_repo),
+            ScenarioService(),
         )
         screening_controller = ScreeningController(
-            ScreeningService(screening_repo)
+            ScreeningService(screening_repo), ScreeningExportService()
         )
 
         status = screening_controller.status()

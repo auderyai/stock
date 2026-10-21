@@ -12,13 +12,10 @@ def _conninfo(settings:PostgreSQLSettings)->str:
     return '\n'.join(parts)
 
 class PostgreSQLResearchStore(_ResearchStore):
-    def __init__(self,settings:PostgreSQLSettings,*,read_only:bool=False):
+    def __init__(self,settings:PostgreSQLSettings,*,read_only:bool=True):
         self.settings_record=settings; self.read_only=read_only
         data_settings=DataEngineSettings(conninfo=_conninfo(settings))
-        super().__init__(settings=data_settings)
-        if read_only:
-            try:self.conn.execute('SET default_transaction_read_only TO on')
-            except Exception:pass
+        super().__init__(settings=data_settings, read_only=read_only)
     @property
     def label(self):return self.settings_record.label
 

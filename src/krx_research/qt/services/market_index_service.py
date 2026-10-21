@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from krx_research.ui.data import ChartDataset
-from krx_research.ui.classic_strategies import assess_classic_strategies
-from krx_research.ui.on_demand import TIMEFRAME_LABELS, _chart_frame
-from krx_research.ui.charts import select_chart_window
+from krx_research.analytics.chart_frames import build_chart_frame
+from krx_research.models.workstation import ChartDataset
+from krx_research.analytics.classic_strategies import assess_classic_strategies
+from krx_research.policies.workstation_options import TIMEFRAME_LABELS
+from krx_research.analytics.chart_frames import select_chart_window
 
 
 class MarketIndexService:
@@ -119,7 +120,7 @@ class MarketIndexService:
             "volume": rows.volume.fillna(0),
             "amount": 0,
         })
-        frames = {period: _chart_frame(raw, period) for period in TIMEFRAME_LABELS}
+        frames = {period: build_chart_frame(raw, period) for period in TIMEFRAME_LABELS}
         name = "KOSPI 종합" if code == "1001" else "KOSDAQ 종합" if code == "2001" else str(item.get("index_name") or code)
         return ChartDataset(
             ticker=code,
