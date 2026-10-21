@@ -15,8 +15,8 @@ where git.exe >nul 2>&1 || goto missing_git
 py -3.11 -c "import struct,sys;raise SystemExit(0 if sys.version_info[:2]==(3,11) and struct.calcsize('P')*8==64 else 1)" >nul 2>&1 || goto missing_python
 
 echo [2/6] Preparing C:\stock...
-if exist "%ROOT%\.git\NUL" goto existing_repo
-if exist "%ROOT%\NUL" goto occupied_root
+if exist "%ROOT%\.git" goto existing_repo
+if exist "%ROOT%\" goto occupied_root
 git clone "%REMOTE%" "%ROOT%" || goto failed
 goto repository_ready
 
@@ -43,8 +43,8 @@ if not exist "%PY_NEXT%" py -3.11 -m venv "%ROOT%\.venv_finplot" || goto failed
 "%PY_NEXT%" -m pip install --upgrade pip || goto failed
 "%PY_NEXT%" -m pip install -e "%ROOT%\nextgen" || goto failed
 
-echo [5/6] Preparing a secret-free local configuration template...
-if not exist "%ROOT%\.env" copy /Y "%ROOT%\.env.example" "%ROOT%\.env" >nul || goto failed
+echo [5/6] Preserving local configuration...
+if not exist "%ROOT%\.env" copy "%ROOT%\.env.example" "%ROOT%\.env" >nul || goto failed
 
 echo [6/6] Verifying installed source code...
 set "PYTHONPATH=%ROOT%\src;%ROOT%\nextgen\src"
@@ -62,7 +62,7 @@ exit /b 0
 
 :verify
 echo [1/4] Verifying the prepared laptop...
-if not exist "%ROOT%\.git\NUL" goto missing_repo
+if not exist "%ROOT%\.git" goto missing_repo
 if not exist "%PY_MAIN%" goto missing_environment
 if not exist "%ROOT%\.env" goto missing_configuration
 
@@ -107,7 +107,7 @@ echo [ERROR] The laptop Python environment is missing. Run this patch without ar
 exit /b 2
 
 :missing_configuration
-echo [ERROR] C:\stock\.env is missing. Run this patch without arguments first.
+echo [ERROR] C:\stock\.env is missing. Prepare it from .env.example before running verify.
 exit /b 2
 
 :missing_oauth

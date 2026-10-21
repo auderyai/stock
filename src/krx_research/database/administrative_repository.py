@@ -45,7 +45,8 @@ class AdministrativeRepository(AbstractContextManager):
 
     def server_identity(self) -> dict[str, Any]:
         return dict(self._repository.conn.execute(
-            "SELECT current_database() AS db, current_user AS user, version() AS version"
+            "SELECT current_database() AS db, current_user AS user, version() AS version, "
+            "current_setting('transaction_read_only') AS read_only"
         ).fetchone())
 
     def grant_reader(self, reader: str) -> dict[str, str]:
