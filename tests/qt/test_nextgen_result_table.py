@@ -97,6 +97,17 @@ class NextGenResultTableTests(unittest.TestCase):
 
         self.assertEqual(Qt.AlignmentFlag.AlignCenter, alignment)
 
+    def test_chart_navigation_preserves_source_alignment(self) -> None:
+        table = ResultTable()
+        table.set_frame(
+            pd.DataFrame([{"value_0": "002360"}]),
+            alignment_overrides={"value_0": "center"},
+        )
+
+        alignment = table.model().index(0, 0).data(Qt.ItemDataRole.TextAlignmentRole)
+
+        self.assertEqual(Qt.AlignmentFlag.AlignCenter, alignment)
+
     def test_auxiliary_code_column_is_center_aligned(self) -> None:
         table = _Table(("시장", "코드", "종합·업종 지수"), identity_key="index_code")
         table.fill(

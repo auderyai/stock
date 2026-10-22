@@ -29,12 +29,14 @@ class DataFrameModel(QAbstractTableModel):
         parent=None,
         *,
         labels: dict[str, str] | None = None,
+        alignment_overrides: dict[str, str] | None = None,
         policy: TablePresentationPolicy | None = None,
     ) -> None:
         super().__init__(parent)
         self._policy = policy or DEFAULT_TABLE_POLICY
         self._frame = self._policy.prepare(frame)
         self._labels = dict(labels or {})
+        self._alignment_overrides = dict(alignment_overrides or {})
 
     @property
     def frame(self) -> pd.DataFrame:
@@ -44,18 +46,20 @@ class DataFrameModel(QAbstractTableModel):
         return self._policy.format_value(column, value)
 
     def alignment(self, column: str, value) -> str:
-        return self._policy.alignment(column, value)
+        return self._alignment_overrides.get(column, self._policy.alignment(column, value))
 
     def set_frame(
         self,
         frame: pd.DataFrame | None,
         *,
         labels: dict[str, str] | None = None,
+        alignment_overrides: dict[str, str] | None = None,
     ) -> None:
         self.beginResetModel()
         self._frame = self._policy.prepare(frame)
         if labels is not None:
             self._labels = dict(labels)
+        self._alignment_overrides = dict(alignment_overrides or {})
         self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()) -> int:
@@ -72,7 +76,7 @@ class DataFrameModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return self._policy.format_value(column, value)
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            return _ALIGNMENTS[self._policy.alignment(column, value)]
+            return _ALIGNMENTS[self.alignment(column, value)]
         if role == Qt.ItemDataRole.UserRole:
             return self._frame.iloc[index.row()].to_dict()
         return None
@@ -167,8 +171,11 @@ class ResultTable(QTableView):
         frame: pd.DataFrame | None,
         *,
         labels: dict[str, str] | None = None,
+        alignment_overrides: dict[str, str] | None = None,
     ) -> None:
-        self._model.set_frame(frame, labels=labels)
+        self._model.set_frame(
+            frame, labels=labels, alignment_overrides=alignment_overrides
+        )
         default = self._model.apply_default_sort()
         if default is not None:
             self.horizontalHeader().setSortIndicator(*default)

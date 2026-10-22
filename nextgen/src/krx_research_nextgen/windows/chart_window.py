@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from krx_research_nextgen.models.chart_data import ChartBundle, STRATEGY_OPTIONS, TIMEFRAME_LABELS
 from krx_research_nextgen.models.screening import ScreeningResult
 from krx_research_nextgen.presentation.embedded_finplot_widget import EmbeddedFinplotWidget
-from krx_research_nextgen.presentation.screening_table import HEADERS, row_values
+from krx_research_nextgen.presentation.screening_table import LABELS, result_frame
 from krx_research_nextgen.widgets.result_table import ResultTable
 
 
@@ -88,9 +88,15 @@ class ChartWindow(QMainWindow):
         self.status.setText(f"{bundle.symbol} · {TIMEFRAME_LABELS[timeframe]} · 최근 {len(bundle.frame):,}개 봉")
 
     def set_navigation(self, rows: list[ScreeningResult], selected: str) -> None:
-        self.set_navigation_data(HEADERS[1:],
-                                 [{"code": item.stock_code, "values": row_values(item, include_date=False)} for item in rows],
-                                 selected)
+        self._guard = True
+        try:
+            self.navigation.set_frame(
+                result_frame(rows).drop(columns="trade_date"), labels=LABELS
+            )
+            if selected:
+                self.navigation.select_ticker(selected)
+        finally:
+            self._guard = False
 
     def set_navigation_data(self, headers, items, selected: str, alignments=None) -> None:
         self._guard = True
@@ -100,7 +106,11 @@ class ChartWindow(QMainWindow):
              for entry in items),
             columns=("ticker", *fields),
         )
-        self.navigation.set_frame(frame, labels={**{"ticker": "종목코드"}, **dict(zip(fields, headers, strict=True))})
+        self.navigation.set_frame(
+            frame,
+            labels={**{"ticker": "종목코드"}, **dict(zip(fields, headers, strict=True))},
+            alignment_overrides=dict(zip(fields, alignments or (), strict=False)),
+        )
         self.navigation.setColumnHidden(0, True)
         if selected:
             matches = self.navigation.frame.index[self.navigation.frame["ticker"].astype(str) == str(selected)]
