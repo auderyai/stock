@@ -3,7 +3,7 @@ name: Stock daily DB update to Google Drive
 on:
   schedule:
     # GitHub cron is UTC: 12:00 UTC = 21:00 Asia/Seoul.
-    - cron: "0 12 * * 1-5"
+    - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
       target_date:

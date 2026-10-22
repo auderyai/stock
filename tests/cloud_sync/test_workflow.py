@@ -35,7 +35,7 @@ class StockDriveWorkflowTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('cron: "0 12 * * 1-5"', workflow)
+        self.assertIn('cron: "0 12 * * *"', workflow)
         self.assertEqual(1, workflow.count("- cron:"))
         self.assertNotIn('timezone:', workflow)
         self.assertIn("scheduled-menu5:", workflow)
