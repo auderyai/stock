@@ -78,6 +78,10 @@ class FinancialBackfillService:
         max_batches: int = 0,
     ) -> dict[str, Any]:
         metadata = self._metadata(list(years))
+        if metadata.get("restore_deleted_requested"):
+            return self._restore_next_deleted(
+                metadata, years=years, batch_size=batch_size, max_batches=max_batches
+            )
         for year in years:
             state = (metadata.get("years") or {}).get(str(year), {})
             targets = self._target_periods(state, year)
@@ -89,6 +93,32 @@ class FinancialBackfillService:
                     max_batches=max_batches,
                 )
         return {"status": "complete", "years": list(years)}
+
+    def request_drive_restore(
+        self,
+        targets: tuple[tuple[int, FinancialPeriod], ...],
+        *,
+        years: tuple[int, ...] = DEFAULT_YEARS,
+    ) -> dict[str, Any]:
+        """Queue reconstruction of verified archives that were removed from Drive."""
+        metadata = self._metadata(list(years))
+        labels = []
+        for year, period in targets:
+            if year not in years:
+                raise ValueError(f"복구 대상 연도가 요청 범위에 없습니다: {year}")
+            state = (
+                ((metadata.get("years") or {}).get(str(year), {}).get("periods") or {})
+                .get(period.label, {})
+            )
+            if not (state.get("drive_cleaned") or state.get("restore_in_progress")):
+                raise RuntimeError(
+                    f"삭제가 확인된 재무자료만 복구할 수 있습니다: {year}:{period.label}"
+                )
+            labels.append(f"{year}:{period.label}")
+        metadata["restore_deleted_requested"] = True
+        metadata["restore_deleted_targets"] = labels
+        self._write_metadata(metadata)
+        return {"status": "restore-requested", "periods": labels}
 
     def sync_local(
         self,
@@ -111,29 +141,29 @@ class FinancialBackfillService:
         )
         if active is not None:
             return {"status": "awaiting-cloud", "year": year, "period": active.label}
-        period = next(
-            (
-                candidate for candidate in targets
-                if periods.get(candidate.label, {}).get("cloud_completed")
-                and (
-                    not periods.get(candidate.label, {}).get("local_completed")
-                    or not periods.get(candidate.label, {}).get("drive_cleaned")
-                )
-            ),
-            None,
-        )
-        if period is None:
-            return {"status": "awaiting-cloud", "year": year}
         applied: list[str] = []
         with open_financial_repository() as repository, tempfile.TemporaryDirectory(
             prefix="stock-financial-local-"
         ) as temporary_name:
             repository.initialize_schema()
+            period = next(
+                (
+                    candidate for candidate in targets
+                    if periods.get(candidate.label, {}).get("cloud_completed")
+                    and repository.period_fact_count(year, candidate)
+                    != int(periods.get(candidate.label, {}).get("facts") or 0)
+                ),
+                None,
+            )
+            if period is None:
+                return {"status": "up-to-date", "year": year}
             work = Path(temporary_name)
             state = periods[period.label]
             for record in state.get("batches", []):
-                if record.get("local_applied"):
-                    continue
+                if record.get("drive_deleted") or not record.get("id"):
+                    raise RuntimeError(
+                        f"Drive 재무자료 복구가 필요합니다: {year} {period.label}"
+                    )
                 encrypted = self._context.drive.download(
                     str(record["id"]), work / str(record["name"])
                 )
@@ -188,27 +218,11 @@ class FinancialBackfillService:
         if metadata is None:
             return {"status": "awaiting-cloud", "years": list(years)}
         for year in years:
-            state = (metadata.get("years") or {}).get(str(year), {})
-            if state.get("local_completed") and not state.get("drive_cleaned"):
-                return self.sync_local(
-                    year, years=years, cleanup_confirmed=cleanup_confirmed
-                )
-            periods = state.get("periods") or {}
-            targets = self._stored_targets(state)
-            if any(
-                periods.get(period.label, {}).get("cloud_completed")
-                and (
-                    not periods.get(period.label, {}).get("local_completed")
-                    or not periods.get(period.label, {}).get("drive_cleaned")
-                )
-                for period in targets
-            ):
-                return self.sync_local(
-                    year, years=years, cleanup_confirmed=cleanup_confirmed
-                )
-            if state.get("local_completed"):
-                continue
-            return {"status": "awaiting-cloud", "year": year}
+            result = self.sync_local(
+                year, years=years, cleanup_confirmed=cleanup_confirmed
+            )
+            if result["status"] != "up-to-date":
+                return result
         return {"status": "up-to-date", "years": list(years)}
 
     def status(self, years: tuple[int, ...] = DEFAULT_YEARS) -> dict[str, Any]:
@@ -317,6 +331,51 @@ class FinancialBackfillService:
             "companies": len(companies),
             "facts": state["facts"],
         }
+
+    def _restore_next_deleted(
+        self,
+        metadata: dict[str, Any],
+        *,
+        years: tuple[int, ...],
+        batch_size: int,
+        max_batches: int,
+    ) -> dict[str, Any]:
+        requested = set(metadata.get("restore_deleted_targets") or [])
+        for year in years:
+            year_state = (metadata.get("years") or {}).get(str(year), {})
+            for period in self._stored_targets(year_state):
+                if f"{year}:{period.label}" not in requested:
+                    continue
+                state = (year_state.get("periods") or {}).get(period.label, {})
+                if not (state.get("drive_cleaned") or state.get("restore_in_progress")):
+                    continue
+                if not state.get("restore_in_progress"):
+                    state["deleted_batch_audit"] = [
+                        {
+                            key: record.get(key)
+                            for key in ("batch_id", "offset", "companies", "facts")
+                        }
+                        for record in state.get("batches", [])
+                    ]
+                    state.update(
+                        batches=[], facts=0, next_offset=0, cloud_completed=False,
+                        drive_cleaned=False, restore_in_progress=True,
+                    )
+                    self._write_metadata(metadata)
+                result = self._collect_period(
+                    metadata, year, period,
+                    batch_size=batch_size, max_batches=max_batches,
+                )
+                if result["status"] == "complete":
+                    state["restore_in_progress"] = False
+                    state["restored_for_multi_device"] = True
+                    self._write_metadata(metadata)
+                result["restore_deleted"] = True
+                return result
+        metadata["restore_deleted_requested"] = False
+        metadata["restore_deleted_targets"] = []
+        self._write_metadata(metadata)
+        return {"status": "restore-complete", "years": list(years)}
 
     def _period_folder(self, year: int, period: FinancialPeriod) -> str:
         root = self._context.drive.ensure_folder("financial-backfill")

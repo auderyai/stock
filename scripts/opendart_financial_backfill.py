@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from krx_research.cloud_sync.credentials import DriveCredentials
 from krx_research.cloud_sync.drive import GoogleDriveClient, GoogleDriveTransientError
 from krx_research.financial_backfill.client import OpenDartClient, OpenDartTransientError
+from krx_research.financial_backfill.models import FinancialPeriod
 from krx_research.financial_backfill.service import (
     DEFAULT_YEARS,
     FinancialBackfillContext,
@@ -30,6 +31,23 @@ def _years(value: str) -> tuple[int, ...]:
     return years
 
 
+def _restore_periods(value: str) -> tuple[tuple[int, FinancialPeriod], ...]:
+    try:
+        targets = tuple(
+            (int(year), FinancialPeriod.parse(period))
+            for item in value.split(",")
+            for year, period in (item.strip().split(":", 1),)
+            if item.strip()
+        )
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(
+            "복구 기간은 연도:기간을 쉼표로 구분해야 합니다."
+        ) from exc
+    if not targets:
+        raise argparse.ArgumentTypeError("복구할 재무기간이 필요합니다.")
+    return targets
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description="OpenDART 분기별 수집 → DuckDB 검증 → 암호화 Drive → 로컬 PostgreSQL"
@@ -43,6 +61,10 @@ def parser() -> argparse.ArgumentParser:
     cloud.add_argument("--year", type=int, help="지정하지 않으면 다음 허용 연도")
     cloud.add_argument("--batch-size", type=int, default=100)
     cloud.add_argument("--max-batches", type=int, default=0, help="0은 해당 분기 전체")
+    cloud.add_argument(
+        "--restore-periods", type=_restore_periods,
+        help="Drive에 재생성할 삭제 기간(예: 2024:Q3,2024:ANNUAL)",
+    )
     local = commands.add_parser("sync-local", help="완료 연도를 로컬 PostgreSQL에 반영")
     local.add_argument("--year", type=int, required=True)
     local.add_argument("--cleanup-confirm", choices=("DELETE_VERIFIED_FINANCIAL_ARCHIVES",))
@@ -75,6 +97,10 @@ def main(argv: list[str] | None = None) -> int:
                 api_key = os.getenv("OPENDART_API_KEY", "")
                 with OpenDartClient(api_key) as client:
                     service = FinancialBackfillService(context, client)
+                    if args.restore_periods:
+                        service.request_drive_restore(
+                            args.restore_periods, years=args.years
+                        )
                     result = (
                         service.cloud_collect(
                             args.year, years=args.years,

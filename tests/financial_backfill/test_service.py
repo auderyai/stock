@@ -1,6 +1,6 @@
 from pathlib import Path
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from krx_research.financial_backfill.models import FinancialPeriod
 from krx_research.financial_backfill.service import (
@@ -165,6 +165,91 @@ class FinancialBackfillServiceTests(unittest.TestCase):
         service.sync_local.assert_called_once_with(
             2025, years=(2025,), cleanup_confirmed=False
         )
+
+    def test_restore_request_is_limited_to_explicit_deleted_periods(self) -> None:
+        drive = MagicMock(root_folder_id="root")
+        drive.read_json.return_value = {
+            "format_version": 1,
+            "year_order": [2024, 2023],
+            "years": {
+                "2024": {"periods": {"Q3": {"drive_cleaned": True}}},
+                "2023": {"periods": {"Q1": {"drive_cleaned": True}}},
+            },
+        }
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
+        )
+
+        result = service.request_drive_restore(
+            ((2024, FinancialPeriod.Q3), (2023, FinancialPeriod.Q1)),
+            years=(2024, 2023),
+        )
+
+        self.assertEqual(
+            {"status": "restore-requested", "periods": ["2024:Q3", "2023:Q1"]},
+            result,
+        )
+        saved = drive.write_json.call_args.args[0]
+        self.assertTrue(saved["restore_deleted_requested"])
+        self.assertEqual(["2024:Q3", "2023:Q1"], saved["restore_deleted_targets"])
+
+    def test_cloud_collection_prioritizes_requested_restore(self) -> None:
+        drive = MagicMock(root_folder_id="root")
+        drive.read_json.return_value = {
+            "format_version": 1,
+            "year_order": [2024],
+            "restore_deleted_requested": True,
+            "restore_deleted_targets": ["2024:Q3"],
+            "years": {},
+        }
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=MagicMock()
+        )
+        service._restore_next_deleted = MagicMock(
+            return_value={"status": "complete", "restore_deleted": True}
+        )
+
+        result = service.cloud_collect_next(years=(2024,), batch_size=100)
+
+        self.assertTrue(result["restore_deleted"])
+        service._restore_next_deleted.assert_called_once()
+
+    @patch("krx_research.financial_backfill.service.ArchiveCipher.decrypt")
+    @patch("krx_research.financial_backfill.service.open_financial_repository")
+    def test_local_sync_uses_local_database_not_shared_applied_flag(
+        self, open_repository, decrypt
+    ) -> None:
+        drive = MagicMock(root_folder_id="root")
+        metadata = {
+            "format_version": 1,
+            "year_order": [2024],
+            "years": {"2024": {
+                "target_periods": ["Q3"],
+                "periods": {"Q3": {
+                    "cloud_completed": True,
+                    "facts": 1,
+                    "batches": [{
+                        "id": "drive-id", "name": "batch.enc", "sha256": "hash",
+                        "batch_id": "batch", "local_applied": True,
+                    }],
+                }},
+            }},
+        }
+        drive.read_json.return_value = metadata
+        drive.download.side_effect = lambda _id, path: path
+        repository = open_repository.return_value.__enter__.return_value
+        repository.period_fact_count.side_effect = (0, 1)
+        repository.apply_archive.return_value = {"batch_id": "batch"}
+        service = FinancialBackfillService(
+            FinancialBackfillContext(Path.cwd(), drive, "key"), client=None
+        )
+        service._sha256 = MagicMock(return_value="hash")
+
+        result = service.sync_local(2024, years=(2024,))
+
+        self.assertEqual("complete-period", result["status"])
+        drive.download.assert_called_once()
+        decrypt.assert_called_once()
 
 
 if __name__ == "__main__":

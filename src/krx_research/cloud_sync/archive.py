@@ -408,6 +408,7 @@ class DeltaArchiveApplier:
         relation = sql.Identifier(spec.schema, spec.table)
         temporary_name = f"drive_stage_{spec.schema}_{spec.table}"
         temporary = sql.Identifier(temporary_name[:63])
+        self._conn.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(temporary))
         self._conn.execute(
             sql.SQL("CREATE TEMP TABLE {} (LIKE {} INCLUDING DEFAULTS) ON COMMIT DROP").format(
                 temporary, relation

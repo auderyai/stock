@@ -28,8 +28,7 @@ Drive에 해당 연도의 현재 수집 대상 보고서가 모두 완료된 후
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2026,2025,2024,2023 sync-local --year 2026 `
-  --cleanup-confirm DELETE_VERIFIED_FINANCIAL_ARCHIVES
+  --years 2026,2025,2024,2023 sync-local --year 2026
 ```
 
 상태만 확인할 때는 다음 명령을 사용한다.
@@ -45,15 +44,16 @@ $env:PYTHONPATH='src'
 ```powershell
 $env:PYTHONPATH='src'
 .venv_krx_menu\Scripts\python.exe scripts\opendart_financial_backfill.py `
-  --years 2026,2025,2024,2023 sync-ready-local `
-  --cleanup-confirm DELETE_VERIFIED_FINANCIAL_ARCHIVES
+  --years 2026,2025,2024,2023 sync-ready-local
 ```
 
-`tools\setup\INSTALL_OPENDART_FINANCIAL_SYNC_ON_LOGON.cmd`를 한 번 실행하면 현재 사용자의
-Windows 로그인 때 위 검사를 숨김 실행한다. 실행 기록은
-`logs\financial_backfill\startup_sync.log`에 남는다. 클라우드의 4개 보고 기간이 모두
-완료되지 않은 연도는 내려받거나 DB에 쓰지 않는다. 삭제 확인 문자열은 설치된 자동화에
-명시되어 있으며, 로컬 멱등 재검증이 끝나기 전에는 삭제 단계에 도달하지 않는다.
+여러 PC는 각자의 PostgreSQL 건수를 기준으로 같은 Drive 배치를 멱등 반영한다. 자동 실행은
+등록하지 않으며 사용자가 GitHub Actions 완료를 확인한 뒤 위 명령을 직접 실행한다.
+Drive 재무 배치는 모든 사용 PC가 반영할 수 있도록 기본적으로 보존한다.
+
+삭제된 배치를 다시 보관할 때는 GitHub Actions의 `restore_periods`에 필요한 기간만
+`2024:Q3,2024:ANNUAL` 형식으로 지정한다. 한 번 요청하면 이후 30분 주기 실행이 저장된
+복구 대상만 이어서 처리한다. 복구 배치는 로컬 반영 후에도 자동 삭제하지 않는다.
 
 로컬 반영이 끝나도 기대 행 수와 실제 행 수가 다르거나 일부 배치가 미반영이면 Drive
 파일을 삭제하지 않는다. 완전 반영이 확인된 파일만 하나씩 삭제하고 매번 체크포인트를

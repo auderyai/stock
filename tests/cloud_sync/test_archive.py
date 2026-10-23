@@ -15,6 +15,7 @@ from krx_research.cloud_sync.archive import (
     DeltaArchiveApplier,
     _extracted_archive,
 )
+from krx_research.cloud_sync.models import TableSpec
 
 
 class ArchiveCipherTests(unittest.TestCase):
@@ -136,6 +137,24 @@ class ArchiveCipherTests(unittest.TestCase):
 
         self.assertEqual("applied", result["apply_status"])
         self.assertEqual(0, connection.depth)
+
+    def test_delta_apply_drops_interrupted_session_stage_before_create(self) -> None:
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.copy.return_value.__enter__.return_value = MagicMock()
+        spec = TableSpec("financial.company_master", ("corp_code",))
+        applier = DeltaArchiveApplier(connection, tables=(spec,))
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            root = Path(name)
+            (root / "company.csv").write_text("corp_code\n001\n", encoding="utf-8")
+            applier._apply_table(root, {
+                "relation": spec.relation,
+                "columns": ["corp_code"],
+                "file": "company.csv",
+            })
+
+        first_statement = str(connection.execute.call_args_list[0].args[0])
+        self.assertIn("DROP TABLE IF EXISTS", first_statement)
 
 
 if __name__ == "__main__":

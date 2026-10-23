@@ -16,31 +16,24 @@ class ContinuousFinancialAutomationTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("if (( rc == 75 )); then", workflow)
 
-    def test_local_sync_repeats_without_overlapping(self) -> None:
-        task = (
-            ROOT / "tools/setup/REGISTER_OPENDART_FINANCIAL_SYNC_TASK.ps1"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("-Minutes 10", task)
-        self.assertIn("-MultipleInstances IgnoreNew", task)
-        self.assertIn("sync_opendart_financial_from_drive.cmd", task)
-        self.assertIn("-RunLevel Limited", task)
-
+    def test_local_sync_is_manual_and_retains_drive_archives(self) -> None:
         runner = (
             ROOT / "KRX_Menu_Launcher/sync_opendart_financial_from_drive.cmd"
         ).read_text(encoding="utf-8")
-        self.assertIn('%~dp0..', runner)
-        self.assertIn(
-            "--cleanup-confirm DELETE_VERIFIED_FINANCIAL_ARCHIVES", runner
-        )
+        self.assertIn("sync-ready-local", runner)
+        self.assertNotIn("--cleanup-confirm", runner)
         self.assertNotIn('set "ROOT=C:\\stock"', runner)
 
-    def test_logon_installer_registers_the_repeating_task(self) -> None:
-        installer = (
-            ROOT / "tools/setup/INSTALL_OPENDART_FINANCIAL_SYNC_ON_LOGON.cmd"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("REGISTER_OPENDART_FINANCIAL_SYNC_TASK.cmd", installer)
+    def test_periodic_local_sync_installers_are_disabled(self) -> None:
+        for path in (
+            "tools/setup/INSTALL_OPENDART_FINANCIAL_SYNC_ON_LOGON.cmd",
+            "tools/setup/REGISTER_OPENDART_FINANCIAL_SYNC_TASK.cmd",
+            "tools/setup/REGISTER_OPENDART_FINANCIAL_SYNC_TASK.ps1",
+            "KRX_Menu_Launcher/RUN_OPENDART_FINANCIAL_SYNC_ON_LOGON.vbs",
+        ):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            self.assertNotIn("Register-ScheduledTask", text)
+            self.assertNotIn("sync_opendart_financial_from_drive.cmd", text)
 
 
 if __name__ == "__main__":

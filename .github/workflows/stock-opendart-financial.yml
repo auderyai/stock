@@ -16,6 +16,11 @@ on:
         required: false
         default: "100"
         type: string
+      restore_periods:
+        description: "Drive에 다시 보관할 삭제 기간(연도:기간, 쉼표 구분)"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: stock-menu5-opendart-financial
@@ -66,6 +71,9 @@ jobs:
           args=(--years 2026,2025,2024,2023 cloud-menu5 --batch-size "${{ inputs.batch_size || '100' }}")
           if [[ -n "${{ inputs.year }}" ]]; then
             args+=(--year "${{ inputs.year }}")
+          fi
+          if [[ -n "${{ inputs.restore_periods }}" ]]; then
+            args+=(--restore-periods "${{ inputs.restore_periods }}")
           fi
           set +e
           python scripts/opendart_financial_backfill.py "${args[@]}"

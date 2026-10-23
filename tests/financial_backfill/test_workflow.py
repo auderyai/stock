@@ -11,6 +11,8 @@ class OpenDartWorkflowTests(unittest.TestCase):
         self.assertIn("OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}", text)
         self.assertIn("menu5-opendart-financial:", text)
         self.assertIn("--years 2026,2025,2024,2023", text)
+        self.assertIn("restore_periods:", text)
+        self.assertIn('--restore-periods "${{ inputs.restore_periods }}"', text)
         self.assertIn("timeout-minutes: 355", text)
         self.assertNotIn("crtfc_key", text)
 
