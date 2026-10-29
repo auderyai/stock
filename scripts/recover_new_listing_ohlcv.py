@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from krx_research.application.new_listing_recovery import NewListingRecoveryService
 from krx_research.collectors import fetch_ohlcv, fetch_security_master
+from krx_research.collectors.bounded_market_data import BoundedOhlcvFetcher
 from krx_research.data_engine.config import DataEngineSettings
 from krx_research.data_engine.operational_repository import OperationalDataRepository
 
@@ -43,15 +44,16 @@ def main() -> int:
         master = fetch_security_master()
         if args.apply:
             repository.upsert_security_master(master)
-        report = NewListingRecoveryService(repository, fetch_ohlcv).recover(
-            master,
-            args.since,
-            as_of,
-            tickers=tuple(args.ticker),
-            max_tickers=args.max_tickers,
-            apply=args.apply,
-            progress=print,
-        )
+        with BoundedOhlcvFetcher(fetch_ohlcv) as fetcher:
+            report = NewListingRecoveryService(repository, fetcher).recover(
+                master,
+                args.since,
+                as_of,
+                tickers=tuple(args.ticker),
+                max_tickers=args.max_tickers,
+                apply=args.apply,
+                progress=print,
+            )
     stamp = dt.datetime.now(KST).strftime("%Y%m%d_%H%M%S")
     log = ROOT / "logs" / f"new_listing_ohlcv_recovery_{stamp}.json"
     log.parent.mkdir(parents=True, exist_ok=True)

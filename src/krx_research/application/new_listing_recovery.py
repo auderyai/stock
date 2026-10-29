@@ -77,8 +77,18 @@ class NewListingRecoveryService:
                     "rows_written": written,
                     "coverage": coverage,
                 })
+                if progress:
+                    progress(
+                        f"[{position}/{len(candidates)}] {code} 완료: "
+                        f"누락 {len(missing_dates):,}건 / 저장 {written:,}건"
+                    )
             except Exception as error:  # noqa: BLE001
                 failures.append({"ticker": code, "error": f"{type(error).__name__}: {error}"})
+                if progress:
+                    progress(
+                        f"[{position}/{len(candidates)}] {code} 실패: "
+                        f"{type(error).__name__}: {error}"
+                    )
         return {
             "status": "completed" if not failures else "failed",
             "apply": apply,
