@@ -1031,6 +1031,26 @@ class BaseDataRepository(AbstractContextManager["BaseDataRepository"]):
                 cursor.executemany(query, rows)
         return len(rows)
 
+    def delete_security_master_source_except(
+        self, source: str, stock_codes: list[str]
+    ) -> int:
+        """Remove stale members of one owned master snapshot only."""
+
+        if not stock_codes:
+            raise ValueError("종목 마스터 교체 대상이 없습니다.")
+        key = self._master_columns.get("stock_code")
+        if key is None or "source" not in self._master_column_types:
+            raise RuntimeError("종목 마스터에 stock_code/source 열이 필요합니다.")
+        with self.conn.transaction():
+            result = self.conn.execute(
+                sql.SQL("DELETE FROM {} WHERE source=%s AND NOT ({}::text=ANY(%s::text[]))").format(
+                    self._master_table,
+                    sql.Identifier(key),
+                ),
+                (source, stock_codes),
+            )
+        return int(result.rowcount)
+
     def upsert_ohlcv(self, frame: pd.DataFrame) -> int:
         if frame is None or frame.empty:
             return 0

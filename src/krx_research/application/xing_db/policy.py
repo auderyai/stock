@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
+from typing import Any
 
 
 class DailyCloseWritePolicy:
@@ -24,6 +26,30 @@ class DailyCloseWritePolicy:
 class SecurityMasterSyncPolicy:
     MINIMUM_ROWS = 1_000
     MAXIMUM_DROP_RATE = 0.1
+    SPAC = re.compile(r"(?:스\s*팩|기업인수목적|SPAC)", re.I)
+    MARKET_BY_GUBUN = {"1": "KOSPI", "2": "KOSDAQ"}
+
+    @classmethod
+    def current_stocks(cls, rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+        records = {}
+        for row in rows:
+            code = str(row.get("shcode") or "").strip()
+            name = str(row.get("hname") or "").strip()
+            market = cls.MARKET_BY_GUBUN.get(str(row.get("gubun") or "").strip())
+            instrument = str(row.get("etfgubun") or "0").strip()
+            is_spac = str(row.get("spac_gubun") or "N").strip().upper() == "Y"
+            if (
+                len(code) == 6 and code.isdigit() and name and market
+                and instrument in {"", "0"} and not is_spac
+                and not cls.SPAC.search(name)
+            ):
+                records[code] = {
+                    "stock_code": code,
+                    "stock_name": name,
+                    "market": market,
+                    "source": "LS:t8436",
+                }
+        return list(records.values())
 
     @classmethod
     def validate(cls, incoming: int, existing: int) -> None:

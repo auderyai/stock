@@ -25,11 +25,21 @@ def main() -> int:
         if not container.window.end_date.isEnabled():
             raise RuntimeError("Database trade dates were not loaded")
         container.window.start_date.setDate(container.window.end_date.date())
+        container.window.near_low.setValue(-10.0)
+        container.window.near_high.setValue(0.0)
+        container.window._run_screening(ScreeningKind.NEAR_HIGH_52W, 100, "ALL")
+        near_deadline = time.monotonic() + 30
+        while not container.window.run_button.isEnabled() and time.monotonic() < near_deadline:
+            app.processEvents(); time.sleep(.01)
+        near_frame = container.window.screening_table.frame
+        required = {"high_52w", "distance_from_high_pct"}
+        if near_frame.empty or not required.issubset(near_frame.columns):
+            raise RuntimeError("52-week-near-high results were not rendered with search values")
         container.window._run_screening(ScreeningKind.HIGH_52W, 50, "ALL")
         screen_deadline = time.monotonic() + 30
         while not container.window.run_button.isEnabled() and time.monotonic() < screen_deadline:
             app.processEvents(); time.sleep(.01)
-        rows = container.window.screening_table.rowCount()
+        rows = len(container.window.screening_table.frame)
         if rows < 1:
             raise RuntimeError("52-week-high results were not rendered")
         container.window._chart_now()
@@ -65,14 +75,14 @@ def main() -> int:
             app.processEvents(); time.sleep(.01)
         analysis = scenario._analysis
         if (analysis is None or not analysis.checkpoints or analysis.path.empty or
-                scenario.table.rowCount() != len(analysis.checkpoints) or
+                len(scenario.table.frame) != len(analysis.checkpoints) or
                 len(scenario.price_plot.listDataItems()) < 3 or not scenario.indicator_plot.listDataItems()):
             raise RuntimeError("Indicator scenario analysis returned no data")
         QTimer.singleShot(1500, app.quit)
         result = int(app.exec() or 0)
         print(
             f"NEXTGEN_RUNTIME: PASS title={container.window.windowTitle()!r} "
-            f"high_52w_rows={rows} selected={selected} "
+            f"near_high_rows={len(near_frame)} high_52w_rows={rows} selected={selected} "
             f"chart_items={item_counts} left_edges={left_edges} scenario_rows={len(analysis.checkpoints)} exit={result}"
         )
         return result

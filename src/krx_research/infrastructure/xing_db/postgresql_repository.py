@@ -95,7 +95,6 @@ class PostgreSQLXingMenuRepository:
     """
 
     SPAC = re.compile(r"(?:스\s*팩|기업인수목적|SPAC)", re.I)
-    MARKET_BY_GUBUN = {"1": "KOSPI", "2": "KOSDAQ"}
 
     def __init__(self, settings: DataEngineSettings | None = None,
                  *, application_name: str = "xing_db_menu_v40") -> None:
@@ -148,10 +147,13 @@ class PostgreSQLXingMenuRepository:
 
     def upsert_security_master(self, rows: list[dict[str, Any]]) -> int:
         frame = self._security_master_frame(rows)
-        existing = self.conn.execute(
-            "SELECT count(*) AS count FROM market_core.ls_security_master"
-        ).fetchone()["count"]
-        SecurityMasterSyncPolicy.validate(len(frame), int(existing))
+        existing_rows = self.conn.execute(
+            "SELECT source_fields FROM market_core.ls_security_master"
+        ).fetchall()
+        existing = SecurityMasterSyncPolicy.current_stocks([
+            dict(row["source_fields"]) for row in existing_rows
+        ])
+        SecurityMasterSyncPolicy.validate(len(frame), len(existing))
         source = {str(row.get("shcode") or "").strip(): row for row in rows}
         values = [
             (row.stock_code, row.stock_name, self._json_dumps(source[row.stock_code]))
@@ -166,8 +168,15 @@ class PostgreSQLXingMenuRepository:
                      source_fields=EXCLUDED.source_fields, updated_at=now()""",
                 values,
             )
+            codes = frame["stock_code"].tolist()
+            cur.execute(
+                "DELETE FROM market_core.ls_security_master "
+                "WHERE NOT (stock_code=ANY(%s::text[]))",
+                (codes,),
+            )
             if self._repo.upsert_security_master(frame) != len(frame):
                 raise RuntimeError("LS·기준 종목 마스터 저장 건수가 일치하지 않습니다.")
+            self._repo.delete_security_master_source_except("LS:t8436", codes)
             self._verify_security_master(frame)
         return len(frame)
 
@@ -185,22 +194,8 @@ class PostgreSQLXingMenuRepository:
 
     @classmethod
     def _security_master_frame(cls, rows: list[dict[str, Any]]) -> pd.DataFrame:
-        records = {
-            code: {
-                "stock_code": code,
-                "stock_name": name,
-                "market": market,
-                "source": "LS:t8436",
-            }
-            for row in rows
-            if (code := str(row.get("shcode") or "").strip()).isdigit()
-            and len(code) == 6
-            and (name := str(row.get("hname") or "").strip())
-            and not cls.SPAC.search(name)
-            and (market := cls.MARKET_BY_GUBUN.get(str(row.get("gubun") or "").strip()))
-        }
         return pd.DataFrame(
-            records.values(),
+            SecurityMasterSyncPolicy.current_stocks(rows),
             columns=("stock_code", "stock_name", "market", "source"),
         )
 

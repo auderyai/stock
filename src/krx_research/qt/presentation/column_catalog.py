@@ -29,6 +29,7 @@ COLUMN_LABELS: dict[str, str] = {
     "trading_value_eok": "거래대금(억원)",
     "high_52w": "52주 최고 고가",
     "distance_from_52w_high_pct": "52주 신고가 대비(%)",
+    "distance_from_high_pct": "52주 최고가 대비 종가(%)",
     "ema_order_similarity_pct": "배열 유사도(%)",
     "ema_max_gap_difference_pct": "EMA 간격 차이(%)",
     "ema_shape_distance_pct": "EMA 형상 거리(%)",

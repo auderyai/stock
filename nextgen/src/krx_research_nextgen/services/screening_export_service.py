@@ -9,12 +9,18 @@ from krx_research_nextgen.presentation.repeated_screen_table import (
     HEADERS as REPEATED_HEADERS,
     row_values as repeated_row_values,
 )
-from krx_research_nextgen.presentation.screening_table import HEADERS, row_values
+from krx_research_nextgen.presentation.screening_table import LABELS, result_frame
 
 
 class ScreeningExportService:
     def export(self, rows: list[ScreeningResult], path: str) -> None:
-        self.export_table(HEADERS, [row_values(row) for row in rows], path, "스크리닝 결과")
+        frame = result_frame(rows)
+        self.export_table(
+            [LABELS[column] for column in frame],
+            frame.itertuples(index=False, name=None),
+            path,
+            "스크리닝 결과",
+        )
 
     def export_table(self, headers, rows, path: str, sheet_name: str) -> None:
         values = [headers, *rows]

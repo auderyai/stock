@@ -14,6 +14,9 @@ class LSSecurityMasterSyncTests(unittest.TestCase):
             {"shcode": "000001", "hname": "코스피", "gubun": "1"},
             {"shcode": "179880", "hname": "멜콘", "gubun": "2"},
             {"shcode": "999999", "hname": "테스트스팩", "gubun": "2"},
+            {"shcode": "495980", "hname": "KODEX CD금리액티브", "gubun": "1", "etfgubun": "1"},
+            {"shcode": "500001", "hname": "테스트 ETN", "gubun": "1", "etfgubun": "2"},
+            {"shcode": "123456", "hname": "표시명에 스팩 없음", "gubun": "2", "spac_gubun": "Y"},
         ])
 
         self.assertEqual(
