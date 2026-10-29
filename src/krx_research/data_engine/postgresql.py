@@ -966,6 +966,9 @@ class BaseDataRepository(AbstractContextManager["BaseDataRepository"]):
         working = frame.rename(
             columns={column: aliases.get(str(column), str(column)) for column in frame.columns}
         ).copy()
+        if "listing_date" in working:
+            dates = pd.to_datetime(working["listing_date"], errors="coerce")
+            working["listing_date"] = dates.dt.strftime("%Y-%m-%d").where(dates.notna(), None)
         if not self._master_column_types:
             raise RuntimeError(f"종목 마스터 테이블을 찾을 수 없습니다: {self._master_relation_name}")
 

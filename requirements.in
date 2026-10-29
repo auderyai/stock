@@ -9,6 +9,7 @@ python-dotenv>=1.0,<2
 requests>=2.32,<3
 pypdf>=6,<7
 pykrx>=1,<2
+finance-datareader>=0.9,<1
 pywin32>=306; sys_platform == "win32"
 
 # Original workstation indicator-scenario model
