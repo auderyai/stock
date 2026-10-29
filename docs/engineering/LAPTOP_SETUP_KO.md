@@ -7,7 +7,7 @@ PostgreSQL 18.6 병렬 설치·복원과 메뉴 시작 검증의 최신 결과�
 ## 설치 확인 (2026-10-21)
 
 - Git 및 64비트 Python 3.11.9를 확인했다.
-- `INSTALL_STOCK_LAPTOP.cmd`의 기존 저장소 감지를 `\.git\NUL`에서 `\.git`으로 수정했다.
+- `tools\setup\INSTALL_STOCK_LAPTOP.cmd`의 기존 저장소 감지를 `\.git\NUL`에서 `\.git`으로 수정했다.
   따옴표로 감싼 기존 NUL 경로는 이 Windows 환경에서 존재하는 저장소를 놓쳤다.
 - 기존 설치기를 재실행해 `.venv_krx_menu`, `.venv_finplot`과 선언된 의존성을 설치했다.
 - `.env`는 없을 때만 `.env.example`에서 생성하며, 기존 파일은 보존한다.
@@ -102,5 +102,5 @@ DB 계정은 설치 관리자의 postgres 계정으로 임의 대체하지 않�
 차트 실행: `C:\stock\nextgen\RUN_STAGE4_MAIN_WINDOW.cmd`
 
 실제 DB 복원 및 자격증명 입력 후 두 프로그램을 다시 실행하고 읽기 전용으로 DB 검증을 진행해야 한다.
-`INSTALL_STOCK_LAPTOP.cmd verify`는 DB/OAuth 확인에 더해 Drive 변경분 반영과 예약 작업 등록까지
+`tools\setup\INSTALL_STOCK_LAPTOP.cmd verify`는 DB/OAuth 확인에 더해 Drive 변경분 반영과 예약 작업 등록까지
 수행하므로 단순 조회 검증으로 실행하지 않는다. 양쪽 DB 검증 전에는 사용하지 않는다.

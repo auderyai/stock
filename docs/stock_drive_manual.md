@@ -34,7 +34,7 @@ KRX 작업 메뉴에서는 다음 번호로 Drive 작업을 실행할 수 있다
 
 메뉴 10은 기준일 선택과 삭제 확인을 모두 거치며, 검증되지 않은 자료는 삭제하지 않는다.
 
-`update_stock_from_google_drive.cmd`를 실행한다. 이 명령은 다음 작업을 연속 수행한다.
+`tools\maintenance\UPDATE_STOCK_FROM_GOOGLE_DRIVE.cmd`를 실행한다. 이 명령은 다음 작업을 연속 수행한다.
 
 1. 암호화 자료의 해시를 검증한다.
 2. PostgreSQL에 멱등 반영한다.
@@ -52,7 +52,7 @@ KRX 작업 메뉴에서는 다음 번호로 Drive 작업을 실행할 수 있다
 
 Google Drive 웹 화면에서 파일을 직접 삭제하지 않는다. 메타데이터가 삭제된 파일을 계속 참조하여 다음 동기화가 실패할 수 있다.
 
-`cleanup_synced_google_drive.cmd`를 실행하고 정리 기준일을 입력한다. 이 명령은 다음 조건을 모두 확인한 자료만 삭제한다.
+`tools\maintenance\CLEANUP_SYNCED_GOOGLE_DRIVE.cmd`를 실행하고 정리 기준일을 입력한다. 이 명령은 다음 조건을 모두 확인한 자료만 삭제한다.
 
 - 로컬 동기화 완료 날짜 이하
 - Google Drive 작업 상태에 포함된 날짜

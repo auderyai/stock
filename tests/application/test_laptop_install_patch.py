@@ -5,7 +5,12 @@ import tempfile
 import unittest
 
 
-PATCH = Path(__file__).resolve().parents[2] / "INSTALL_STOCK_LAPTOP.cmd"
+PATCH = (
+    Path(__file__).resolve().parents[2]
+    / "tools"
+    / "setup"
+    / "INSTALL_STOCK_LAPTOP.cmd"
+)
 
 
 class LaptopInstallPatchTest(unittest.TestCase):

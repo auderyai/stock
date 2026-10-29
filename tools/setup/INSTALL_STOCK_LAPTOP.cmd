@@ -56,7 +56,7 @@ echo [OK] Laptop program files and Python environments are ready.
 echo [NEXT] 1. Install PostgreSQL 16 and restore the verified desktop pg_dump.
 echo [NEXT] 2. Enter this laptop's DB and API credentials in C:\stock\.env.
 echo [NEXT] 3. Run C:\stock\tools\setup\SETUP_GOOGLE_DRIVE_OAUTH_ONCE.cmd.
-echo [NEXT] 4. Run this file again with: INSTALL_STOCK_LAPTOP.cmd verify
+echo [NEXT] 4. Run this file again with: "%~f0" verify
 echo [SAFE] Financial startup sync is not registered until multi-PC acknowledgements exist.
 exit /b 0
 
