@@ -85,8 +85,8 @@ class XingDbMenuService:
 
         securities = self._rows("t8436", {"gubun": "0"})
         n = self._repo.upsert_security_master(securities)
-        stages.append(StageResult("t8436 종목 마스터", True, n))
-        self._emit(progress, f"t8436 종목 마스터 {n:,}건 저장")
+        stages.append(StageResult("t8436 LS·기준 종목 마스터", True, n))
+        self._emit(progress, f"t8436 LS·기준 종목 마스터 {n:,}건 검증·저장")
 
         index_codes = self._resolve_index_codes(sectors)
         membership_count = 0

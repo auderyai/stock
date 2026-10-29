@@ -19,3 +19,17 @@ class DailyCloseWritePolicy:
     @classmethod
     def assert_writable(cls, end_date: dt.date, *, now: dt.datetime | None = None) -> None:
         cls.resolve_end_date(end_date, None, now=now)
+
+
+class SecurityMasterSyncPolicy:
+    MINIMUM_ROWS = 1_000
+    MAXIMUM_DROP_RATE = 0.1
+
+    @classmethod
+    def validate(cls, incoming: int, existing: int) -> None:
+        minimum = max(cls.MINIMUM_ROWS, int(existing * (1 - cls.MAXIMUM_DROP_RATE)))
+        if incoming < minimum:
+            raise ValueError(
+                f"t8436 종목 마스터 부분 수신: {incoming:,}건 "
+                f"(필요 {minimum:,}건, 기존 {existing:,}건)"
+            )

@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 from psycopg import sql
 
+from krx_research.application.xing_db.policy import SecurityMasterSyncPolicy
 from krx_research.data_engine.config import DataEngineSettings
 from krx_research.data_engine.market_indices import (
     COMPOSITE_INDEX_SPECS,
@@ -94,6 +95,7 @@ class PostgreSQLXingMenuRepository:
     """
 
     SPAC = re.compile(r"(?:스\s*팩|기업인수목적|SPAC)", re.I)
+    MARKET_BY_GUBUN = {"1": "KOSPI", "2": "KOSDAQ"}
 
     def __init__(self, settings: DataEngineSettings | None = None,
                  *, application_name: str = "xing_db_menu_v40") -> None:
@@ -145,14 +147,16 @@ class PostgreSQLXingMenuRepository:
         return len(values)
 
     def upsert_security_master(self, rows: list[dict[str, Any]]) -> int:
-        values = []
-        for row in rows:
-            code = str(row.get("shcode") or "").strip()
-            name = str(row.get("hname") or "").strip()
-            if re.fullmatch(r"\d{6}", code) and name and not self.SPAC.search(name):
-                values.append((code, name, self._json_dumps(row)))
-        if not values:
-            return 0
+        frame = self._security_master_frame(rows)
+        existing = self.conn.execute(
+            "SELECT count(*) AS count FROM market_core.ls_security_master"
+        ).fetchone()["count"]
+        SecurityMasterSyncPolicy.validate(len(frame), int(existing))
+        source = {str(row.get("shcode") or "").strip(): row for row in rows}
+        values = [
+            (row.stock_code, row.stock_name, self._json_dumps(source[row.stock_code]))
+            for row in frame.itertuples(index=False)
+        ]
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.executemany(
                 """INSERT INTO market_core.ls_security_master
@@ -162,7 +166,43 @@ class PostgreSQLXingMenuRepository:
                      source_fields=EXCLUDED.source_fields, updated_at=now()""",
                 values,
             )
-        return len(values)
+            if self._repo.upsert_security_master(frame) != len(frame):
+                raise RuntimeError("LS·기준 종목 마스터 저장 건수가 일치하지 않습니다.")
+            self._verify_security_master(frame)
+        return len(frame)
+
+    def _verify_security_master(self, expected: pd.DataFrame) -> None:
+        actual = self._repo.get_security_master_frame().set_index("stock_code")
+        wanted = expected.set_index("stock_code")
+        common = actual.reindex(wanted.index)
+        mismatch = common[["stock_name", "market"]].fillna("").ne(
+            wanted[["stock_name", "market"]].fillna("")
+        ).any(axis=1)
+        if mismatch.any():
+            raise RuntimeError(
+                f"LS·기준 종목 마스터 검증 실패: {int(mismatch.sum()):,}건"
+            )
+
+    @classmethod
+    def _security_master_frame(cls, rows: list[dict[str, Any]]) -> pd.DataFrame:
+        records = {
+            code: {
+                "stock_code": code,
+                "stock_name": name,
+                "market": market,
+                "source": "LS:t8436",
+            }
+            for row in rows
+            if (code := str(row.get("shcode") or "").strip()).isdigit()
+            and len(code) == 6
+            and (name := str(row.get("hname") or "").strip())
+            and not cls.SPAC.search(name)
+            and (market := cls.MARKET_BY_GUBUN.get(str(row.get("gubun") or "").strip()))
+        }
+        return pd.DataFrame(
+            records.values(),
+            columns=("stock_code", "stock_name", "market", "source"),
+        )
 
     def replace_index_membership(self, as_of: dt.date, sector_code: str, sector_name: str,
                                  rows: list[dict[str, Any]]) -> int:

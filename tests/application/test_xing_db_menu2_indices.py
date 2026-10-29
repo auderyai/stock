@@ -21,7 +21,7 @@ class _Bridge:
                 {"upcode": "305", "hname": "KOSDAQ150"},
             ]}
         if tr == "t8436":
-            return {"rows": [{"shcode": "000001", "hname": "A"}]}
+            return {"rows": [{"shcode": "000001", "hname": "A", "gubun": "1"}]}
         if tr == "t1516":
             size = 200 if values["upcode"] == "201" else 150
             return {"rows": [
