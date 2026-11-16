@@ -287,7 +287,9 @@ class XingDbMenuService:
                 self._emit(progress, f"[PROGRESS] {pos:,}/{len(codes):,}종목 처리")
 
         verified = self._repo.completed_investor_dates_by_code(codes, start, end, "K")
-        for repair_pass in range(1, self._T1702_REPAIR_PASSES + 1):
+        # CloudSyncService owns the bounded retry and persists every attempt.
+        repair_passes = 0 if independent_target else self._T1702_REPAIR_PASSES
+        for repair_pass in range(1, repair_passes + 1):
             unresolved_by_code = {
                 code: trade_days.get(code, set()) - verified.get(code, set())
                 for code in codes

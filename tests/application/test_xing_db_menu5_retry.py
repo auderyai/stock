@@ -63,12 +63,24 @@ class Menu5RepairTests(unittest.TestCase):
         repository = _Repository()
         repository.latest_market_date = lambda: self.fail("local latest-date dependency")
         repository.stock_trade_dates_by_code = lambda *_: self.fail("local price dependency")
-        report = XingDbMenuService(_TransientBridge(), repository).run_menu5(
+        bridge = _TransientBridge()
+        bridge.failures = 1
+        report = XingDbMenuService(bridge, repository).run_menu5(
             start=DAY, end=DAY, independent_target=True
         )
 
         self.assertTrue(report.passed)
         self.assertEqual({DAY}, repository.completed)
+
+    def test_cloud_retry_is_owned_by_checkpoint_coordinator(self) -> None:
+        repository = _Repository()
+        bridge = _TransientBridge(always_fail=True)
+        progress = []
+        report = XingDbMenuService(bridge, repository).run_menu5(
+            start=DAY, end=DAY, independent_target=True, progress=progress.append)
+        self.assertFalse(report.passed)
+        self.assertEqual(1, bridge.failures)
+        self.assertFalse(any('[REPAIR' in line for line in progress))
 
     def test_repairs_only_unresolved_stock_after_transient_failure(self) -> None:
         repository = _Repository()

@@ -4,6 +4,8 @@ import os
 from datetime import date
 from pathlib import Path
 import subprocess
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +20,53 @@ from krx_research.cloud_sync.repository import menu5_complete
 
 
 class CloudSyncServiceTests(unittest.TestCase):
+    def test_old_date_recovery_preserves_newer_state_and_replays_until_snapshot_is_saved(self):
+        old_day, state_day = date(2026, 10, 20), date(2026, 11, 6)
+        for snapshot_fails in (False, True):
+            with self.subTest(snapshot_fails=snapshot_fails), tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                service = StockDriveSyncService(SyncContext(
+                    root, DriveCredentials('id', 'secret', 'refresh', 'folder', 'key')))
+                metadata = {'state': {'reference_date': state_day.isoformat()},
+                            'completed_stage': 'menu7', 'delta_folder_id': 'deltas'}
+                archive = SimpleNamespace(path=root/'delta.tar.gz', manifest={})
+                drive = MagicMock(root_folder_id='root')
+                with patch('krx_research.cloud_sync.service.open_cloud_connection'), patch(
+                    'krx_research.cloud_sync.service.DatabaseArchiveService') as archives, patch(
+                    'krx_research.cloud_sync.service.ArchiveCipher.encrypt'), patch.object(
+                    service, '_delta_record', return_value={'reference_date': old_day.isoformat()}
+                ), patch.object(service, '_executable'), patch.object(
+                    service, '_state_record', return_value={'reference_date': state_day.isoformat()}
+                ):
+                    exporter = archives.return_value
+                    exporter.export_delta.return_value = archive
+                    exporter.export_snapshot.return_value = archive
+                    if snapshot_fails:
+                        exporter.export_snapshot.side_effect = RuntimeError('interrupted snapshot')
+                        with self.assertRaisesRegex(RuntimeError, 'interrupted snapshot'):
+                            service._publish_checkpoint(drive, metadata, root, 'db', old_day, 'commit', 'menu5')
+                        self.assertEqual([old_day.isoformat()], metadata['replay_delta_dates'])
+                    else:
+                        service._publish_checkpoint(drive, metadata, root, 'db', old_day, 'commit', 'menu5')
+                        self.assertNotIn('replay_delta_dates', metadata)
+                    self.assertEqual(state_day, exporter.export_snapshot.call_args.kwargs['reference_date'])
+                    self.assertEqual(state_day.isoformat(), metadata['state']['reference_date'])
+                    self.assertEqual('menu7', metadata['completed_stage'])
+                    self.assertEqual('menu5', metadata['stage_dates'][old_day.isoformat()])
+
+    def test_weekend_is_skipped_before_database_or_drive_access(self) -> None:
+        context = MagicMock()
+        service = StockDriveSyncService(context)
+        for day in (date(2026, 11, 14), date(2026, 11, 15)):
+            for stage in ('menu5', 'menu7'):
+                with self.subTest(day=day, stage=stage), patch(
+                    'krx_research.cloud_sync.service.database_conninfo') as database:
+                    result = service.cloud_run(day, stage=stage)
+                    self.assertEqual('non-trading-day', result['status'])
+                    self.assertEqual([], result['checkpoints'])
+                    database.assert_not_called()
+                    context.drive.assert_not_called()
+
     def test_child_script_receives_project_src_on_pythonpath(self) -> None:
         root = Path.cwd()
         credentials = DriveCredentials("id", "secret", "refresh", "folder", "key")
@@ -132,6 +181,8 @@ class CloudSyncServiceTests(unittest.TestCase):
 
         with patch.object(SyncContext, "drive", return_value=drive), patch.object(
             service, "_metadata", return_value=metadata
+        ), patch(
+            "krx_research.cloud_sync.service.database_conninfo", return_value="db"
         ), patch.object(service, "_verify_download"), patch(
             "krx_research.cloud_sync.service.ArchiveCipher.decrypt"
         ), patch(

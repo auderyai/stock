@@ -86,14 +86,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             target = args.date or _default_target_date()
             result = service.cloud_run(target, stage=args.stage)
+        skipped = result.get("status") == "non-trading-day"
         with log_path.open("a", encoding="utf-8") as log:
             log.write(
                 f"{datetime.now().astimezone().isoformat(timespec='seconds')} "
-                f"SUCCESS command={args.command} status={result.get('status', 'complete')}\n"
+                f"{'SKIPPED' if skipped else 'SUCCESS'} command={args.command} "
+                f"status={result.get('status', 'complete')}\n"
             )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         print(f"감사 로그: {log_path}")
-        return 0
+        return 2 if skipped else 0
     except (TransientSourceError, GoogleDriveTransientError) as exc:
         with log_path.open("a", encoding="utf-8") as log:
             log.write(

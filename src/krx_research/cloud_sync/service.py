@@ -183,6 +183,9 @@ class StockDriveSyncService:
     def cloud_run(self, target_date: date, *, stage: str = "menu5") -> dict[str, Any]:
         if stage not in {"menu5", "menu7"}:
             raise ValueError(f"지원하지 않는 클라우드 단계입니다: {stage}")
+        if target_date.weekday() >= 5:
+            return {"status": "non-trading-day", "reference_date": target_date.isoformat(),
+                    "reason": "weekend", "checkpoints": []}
         conninfo = database_conninfo()
         with self._context.drive() as drive, tempfile.TemporaryDirectory(prefix="stock-cloud-") as name:
             work = Path(name)
@@ -477,7 +480,10 @@ class StockDriveSyncService:
         delta_record["completed_stage"] = stage
         deltas.append(delta_record)
         completed_stage = self._record_stage(metadata, reference_date, stage)
-        state_day = state_reference_date or reference_date
+        state_day = max(
+            reference_date, state_reference_date or reference_date,
+            date.fromisoformat(str((metadata.get("state") or {}).get("reference_date") or day)),
+        )
         metadata.update(
             {
                 "deltas": sorted(
@@ -493,7 +499,7 @@ class StockDriveSyncService:
             state = DatabaseArchiveService(conn, conninfo=conninfo).export_snapshot(
                 checkpoint_dir / "next-state.tar.gz",
                 pg_dump=self._executable("pg_dump"),
-                reference_date=state_reference_date or reference_date,
+                reference_date=state_day,
                 git_commit=commit,
             )
         next_slot = "b" if metadata.get("state_slot") == "a" else "a"
@@ -582,6 +588,10 @@ class StockDriveSyncService:
         if state_day and state_day not in stages:
             stages[state_day] = str(metadata.get("completed_stage") or "")
         day = reference_date.isoformat()
+        if state_day and day < state_day:
+            metadata["replay_delta_dates"] = sorted(
+                set(metadata.get("replay_delta_dates") or []) | {day}
+            )
         current = str(stages.get(day) or "")
         stages[day] = stage if not cls._stage_completed(current, stage) else current
         metadata["stage_dates"] = stages
