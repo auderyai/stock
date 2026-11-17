@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+import requests
 
 from krx_research.infrastructure.xing_db.adaptive_raw_bridge import (
     AdaptiveRawTrBridge,
@@ -71,6 +72,19 @@ class _UniverseSession:
 
     def close(self) -> None:
         pass
+
+
+class _TimeoutSession(_UniverseSession):
+    def __init__(self) -> None:
+        super().__init__(); self.data_requests = 0
+
+    def post(self, url, **kwargs):
+        if url.endswith("/oauth2/token"):
+            return _JsonResponse(200, {"access_token": "token"})
+        self.data_requests += 1
+        if self.data_requests < 3:
+            raise requests.ReadTimeout("temporary timeout")
+        return super().post(url, **kwargs)
 
 
 class _IndexMembershipSession:
@@ -150,6 +164,22 @@ class AdaptiveBridgeTests(unittest.TestCase):
             bridge.connect(); result = bridge.raw_tr("t8436", {"gubun": "0"})
             self.assertEqual("005930", result["rows"][0]["shcode"])
             self.assertTrue(session.request[0].endswith("/stock/etc"))
+
+    def test_retries_network_timeout_before_failing_over(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:
+            root = Path(name); (root / "src" / "krx_research").mkdir(parents=True)
+            session = _TimeoutSession(); progress: list[str] = []
+            bridge = AdaptiveRawTrBridge(
+                root, session=session, credential_loader=lambda _root: ("key", "secret"),
+                fallback_allowed=False, sleep_fn=lambda _seconds: None,
+                clock_fn=lambda: 1.0, progress=progress.append,
+            )
+
+            bridge.connect(); result = bridge.raw_tr("t8436", {"gubun": "0"})
+
+            self.assertEqual("005930", result["rows"][0]["shcode"])
+            self.assertEqual(3, session.data_requests)
+            self.assertEqual(2, sum("[LS OPENAPI RETRY]" in line for line in progress))
 
     def test_empty_cloud_stock_universe_is_provider_failure(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as name:

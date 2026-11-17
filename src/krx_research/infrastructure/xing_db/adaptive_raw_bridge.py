@@ -125,7 +125,16 @@ class AdaptiveRawTrBridge:
         response = None
         server_retries, token_refreshed = 0, False
         while True:
-            self._pace(tr); response = self._post(path, tr, block, values, continuation, key)
+            self._pace(tr)
+            try:
+                response = self._post(path, tr, block, values, continuation, key)
+            except requests.RequestException as exc:
+                if server_retries >= 2:
+                    raise
+                server_retries += 1
+                self._emit(f"[LS OPENAPI RETRY] {tr}: {type(exc).__name__}, {server_retries}/2")
+                self._sleep(1.25 * server_retries); self._last_call.pop(tr, None)
+                continue
             if self._response_code(response) == "IGW00121" and not token_refreshed:
                 self._emit(f"[LS OPENAPI TOKEN] {tr}: 토큰 무효 감지, 1회 자동 재발급")
                 self._authorize(); token_refreshed = True; self._last_call.pop(tr, None)
