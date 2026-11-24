@@ -283,16 +283,8 @@ class PostgreSQLXingMenuRepository:
             spec = specs[sector_code]
             if spec is None:
                 continue
-            prices = tuple(Decimal(str(row[name])) / LS_INDEX_PRICE_SCALE for name in (
-                "open_price", "high_price", "low_price", "close_price"
-            ))
-            open_price, high_price, low_price, close_price = prices
-            invalid_ohlc = (
-                min(prices) <= 0
-                or high_price < max(open_price, close_price)
-                or low_price > min(open_price, close_price)
-            )
-            if invalid_ohlc:
+            prices = self._sector_prices(row)
+            if prices is None:
                 raise ValueError(f"종합·업종지수 원천 OHLC 오류 ({as_of}, {sector_code})")
             amount = row.get("amount")
             records.append((
@@ -353,10 +345,37 @@ class PostgreSQLXingMenuRepository:
 
     def completed_sector_codes(self, as_of: dt.date) -> set[str]:
         rows = self.conn.execute(
-            "SELECT sector_code FROM market_core.ls_sector_ohlcv_daily WHERE trade_date=%s",
+            """SELECT d.sector_code,m.sector_name,d.open_price,d.high_price,
+                      d.low_price,d.close_price
+                 FROM market_core.ls_sector_ohlcv_daily d
+                 JOIN market_core.ls_sector_master m USING(sector_code)
+                WHERE d.trade_date=%s""",
             (as_of,),
         ).fetchall()
-        return {str(row["sector_code"]).strip() for row in rows if row.get("sector_code")}
+        completed = set()
+        for row in rows:
+            code = str(row.get("sector_code") or "").strip()
+            if code and (
+                ls_sector_index_spec(code, str(row["sector_name"])) is None
+                or self._sector_prices(row) is not None
+            ):
+                completed.add(code)
+        return completed
+
+    @staticmethod
+    def _sector_prices(row: dict[str, Any]) -> tuple[Decimal, ...] | None:
+        try:
+            prices = tuple(Decimal(str(row[name])) / LS_INDEX_PRICE_SCALE for name in (
+                "open_price", "high_price", "low_price", "close_price"
+            ))
+        except (ArithmeticError, KeyError, TypeError, ValueError):
+            return None
+        open_price, high_price, low_price, close_price = prices
+        return prices if (
+            min(prices) > 0
+            and high_price >= max(open_price, close_price)
+            and low_price <= min(open_price, close_price)
+        ) else None
 
     def list_stock_codes(self, ticker: str | None = None, limit: int = 0,
                          offset: int = 0) -> list[str]:
